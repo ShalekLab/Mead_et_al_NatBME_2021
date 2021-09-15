@@ -1,0 +1,943 @@
+---
+title: "Time course KPT-org (Mu) differentiation SeqWell"
+author: "BEM"
+---
+
+### Metadata
+
+* Subcluster on Early Paneth following 1st pass analysis
+* Murine ISC enriched (m795 GFP-) organoids differentiation (ENR+CD) +/- 160 nM KPT-330 over 6 days with TP measures
+* Each timepoint / condition got 1 seq-well array per V3.3 protocol, all seq'd on Nova-seq 
+* seq-well runs:
+  + D0 - ENR+CV x2
+  + D0.25 - Control
+  + D0.25 - KPT-330
+  + D1 - Control
+  + D1 - KPT-330
+  + D2 - Control
+  + D2 - KPT-330
+  + D3 - Control x2
+  + D3 - KPT-330 x2
+  + D4 - Control
+  + D4 - KPT-330
+  + D6 - Control x2
+  + D6 - KPT-330 x2
+
+### Preprocessing
+
+Seurat V3 objects (per array) following DropSeq QC + Doublet removal - Combining + annotating with SCT
+
+#### Load packages
+```{r setup, include=FALSE}
+Sys.setenv(PATH = paste("/Users/bemead/anaconda3/bin", Sys.getenv("PATH"), sep=":"))
+library(tidyverse, quietly = T)
+library(Seurat, quietly = T)
+library(DescTools)
+library(scales)
+library(ggplot2)
+library(superheat)
+library(Matrix)
+library(piano)
+library(RColorBrewer)
+library(viridis)
+library(effectsize)
+library(crunch)
+library(progeny)
+library(dorothea)
+library(viper)
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+```{r}
+package.version("tidyverse")
+package.version("Seurat")
+package.version("DescTools")
+package.version("scales")
+package.version("ggplot2")
+package.version("superheat")
+package.version("Matrix")
+package.version("piano")
+package.version("RColorBrewer")
+package.version("viridis")
+package.version("effectsize")
+package.version("crunch")
+package.version("progeny")
+package.version("dorothea")
+package.version("viper")
+```
+
+
+#### Load Object
+```{r}
+KPT_m = readRDS('2_Full annotation/SCT_KPT_m_20191217.rds')
+treat_cols = rev(c("#EB2626","#AAAAA9"))
+```
+
+#### Subcluster on early Paneth
+```{r}
+KPT_ep = subset(KPT_m, subset = annotate == "early Paneth")
+
+KPT_ep = SCTransform(KPT_ep, verbose = F)
+KPT_ep = RunPCA(KPT_ep, verbose = F)
+ElbowPlot(KPT_ep)
+
+dim = c(1:14)
+KPT_ep = FindNeighbors(KPT_ep, dims = dim, k.param = ceiling(0.5*sqrt(ncol(KPT_ep))), verbose = F)
+KPT_ep = FindClusters(KPT_ep, resolution = 0.3, verbose = F)
+KPT_ep = RunUMAP(KPT_ep, reduction = "pca", dims = dim, verbose = F, umap.method = "umap-learn")
+
+DimPlot(KPT_ep)
+
+FeaturePlot(KPT_ep, features = c("Gob1", "Pan1", "Stem1", "EEC1"))
+VlnPlot(KPT_ep, features = c("Gob1", "Pan1", "Stem1", "EEC1"))
+FeaturePlot(KPT_ep, features = c("ISCI1","ISCII1","ISCIII1"))
+
+ES = Cells(subset(KPT_ep, idents = "1"))
+Gob = Cells(subset(KPT_ep, idents = "3"))
+EEC = Cells(subset(KPT_ep, idents = "4"))
+Stem = Cells(subset(KPT_ep, idents = "2"))
+
+KPT_m$annotate2 = KPT_m$annotate
+
+my_levels = c("stem I", "stem II", "stem III", "early enterocyte", "enterocyte",
+              "early secretory", "early Paneth", "Paneth", "goblet", "enteroendocrine")
+
+KPT_m@meta.data$annotate2 = factor(KPT_m@meta.data$annotate2, levels = my_levels)
+
+KPT_m$annotate2[Gob] = "goblet"
+KPT_m$annotate2[EEC] = "enteroendocrine"
+KPT_m$annotate2[Stem] = "stem I"
+KPT_m$annotate2[ES] = "early secretory"
+
+KPT_colors2 = c("#92D0AE", "#7CC24F", "#32601F", "#53B5E7", 
+"#2C60AD", '#DCE34E', "#FEDE7D", "#F8B718","#FF4027", "#F79538")
+
+Idents(KPT_m) = factor(KPT_m@meta.data$annotate2, levels = my_levels)
+```
+
+#### Updated clustering save
+```{r}
+saveRDS(KPT_m, '2_Full annotation/SCT_KPT_m2_20200619.rds', compress= T)
+KPT_m = readRDS('2_Full annotation/SCT_KPT_m2_20200619.rds')
+KPT_colors2 = c("#92D0AE", "#7CC24F", "#32601F", "#53B5E7", 
+"#2C60AD", "#FFDE7C", "#FFC825","#FF4027", "#F79538")
+treat_cols = rev(c("#EB2626","#AAAAA9"))
+```
+
+#### annotate clusters & find DE genes
+```{r}
+#find markers
+KPT_m.markers = FindAllMarkers(KPT_m, assay = "RNA", min.pct = 0.2, logfc.threshold = 0.5)
+top10 = KPT_m.markers %>% group_by(cluster) %>% top_n(10, avg_logFC)
+top5 = KPT_m.markers %>% group_by(cluster) %>% top_n(5, avg_logFC)
+write.csv(KPT_m.markers, "2_Full annotation/KPT_m_markers_06202020.csv")
+ds_cells = Cells(subset(KPT_m, downsample = 500))
+
+
+#Plot colors
+T_cols = rev(viridis(7))
+T_array_cols = character(length = 17)
+T_array_cols[1:2] = T_cols[1]
+T_array_cols[3:4] = T_cols[2]
+T_array_cols[5:6] = T_cols[3]
+T_array_cols[7:8] = T_cols[4]
+T_array_cols[9:11] = T_cols[5]
+T_array_cols[12:13] = T_cols[6]
+T_array_cols[14:17] = T_cols[7]
+
+KPT_m$percent.mt = PercentageFeatureSet(KPT_m, pattern = "^mt-")
+
+# Plot
+pdf("2_Full annotation/plots/20200620_SCT_KPT_m_ANNOTATE2.pdf", useDingbats = F)
+DimPlot(KPT_m, reduction = "umap", label = T, cols = KPT_colors2) + NoLegend()
+DimPlot(KPT_m, reduction = "umap", group.by = "time", cols = T_cols)
+DimPlot(KPT_m, reduction = "umap", split.by = "treat", cols = KPT_colors2)
+DoHeatmap(KPT_m, top10$gene, ds_cells, raster = F, label = F, assay = "RNA", group.colors = KPT_colors2) +
+  scale_fill_viridis(option = "B")
+VlnPlot(KPT_m, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0, cols = KPT_colors2)
+VlnPlot(KPT_m, features = "nFeature_RNA", ncol = 3, group.by = "array", pt.size = 0, cols = T_array_cols) +
+  NoLegend()
+VlnPlot(KPT_m, features = "nCount_RNA", ncol = 3, group.by = "array", pt.size = 0, cols = T_array_cols) + 
+  NoLegend()
+VlnPlot(KPT_m, features = "percent.mt", ncol = 3, group.by = "array", pt.size = 0, cols = T_array_cols) + 
+  NoLegend()
+dev.off()
+
+pdf("2_Full annotation/plots/20200620_SCT_KPT_m_QC2_2.pdf", useDingbats = F, width = 3, height = 3)
+
+VlnPlot(KPT_m, features = c("nFeature_RNA"), pt.size = 0, cols = KPT_colors2) +
+  NoLegend() + geom_hline(aes(yintercept = 500), linetype = 2) + ylim(0, 7000)
+VlnPlot(KPT_m, features = c("nCount_RNA"), pt.size = 0, cols = KPT_colors2) + 
+  NoLegend() + geom_hline(aes(yintercept = 30000), linetype = 2) + ylim(0, 31000)
+VlnPlot(KPT_m, features = c("percent.mt"), pt.size = 0, cols = KPT_colors2) + 
+  NoLegend() + geom_hline(aes(yintercept = 35), linetype = 2)
+
+VlnPlot(KPT_m, features = "nFeature_RNA", group.by = "array", pt.size = 0, cols = T_array_cols) +
+  NoLegend() + geom_hline(aes(yintercept = 500), linetype = 2) + ylim(0, 7000)
+VlnPlot(KPT_m, features = "nCount_RNA", group.by = "array", pt.size = 0, cols = T_array_cols) + 
+  NoLegend() + geom_hline(aes(yintercept = 30000), linetype = 2) + ylim(0, 31000)
+VlnPlot(KPT_m, features = "percent.mt", group.by = "array", pt.size = 0, cols = T_array_cols) + 
+  NoLegend() + geom_hline(aes(yintercept = 35), linetype = 2)
+
+dev.off
+
+table(KPT_m@meta.data$annotate2)
+```
+
+#### Examine dataset for marker sets
+```{r}
+pdf('2_Full annotation/plots/20200620_SCT_KPT_m_MARKERS2.pdf', useDingbats = F, width = 3, height = 3)
+FeaturePlot(KPT_m, features = c("Ent_prox1"), cols = c("lightgrey", viridis(1)))
+FeaturePlot(KPT_m, features = c("Ent_dist1"), cols = c("lightgrey", viridis(1)))
+FeaturePlot(KPT_m, features = c("Stem1"), cols = c("lightgrey", viridis(1)))
+FeaturePlot(KPT_m, features = c("Gob1"), cols = c("lightgrey", viridis(1)))
+FeaturePlot(KPT_m, features = c("Pan1"), cols = c("lightgrey", viridis(1)))
+FeaturePlot(KPT_m, features = c("EEC1"), cols = c("lightgrey", viridis(1)))
+
+FeaturePlot(subset(KPT_m, idents = c("stem I", "stem II", "stem III")), features = c("ISCI1"), cols = c("lightgrey", viridis(1)))
+FeaturePlot(subset(KPT_m, idents = c("stem I", "stem II", "stem III")), features = c("ISCII1"), cols = c("lightgrey", viridis(1)))
+FeaturePlot(subset(KPT_m, idents = c("stem I", "stem II", "stem III")), features = c("ISCIII1"), cols = c("lightgrey", viridis(1)))
+
+FeaturePlot(subset(KPT_m, idents = c("stem I", "stem II", "stem III")), features = c("G1S1"), cols = c("lightgrey", viridis(1)))
+FeaturePlot(subset(KPT_m, idents = c("stem I", "stem II", "stem III")), features = c("G2M1"), cols = c("lightgrey", viridis(1)))
+
+FeaturePlot(subset(KPT_m, idents = c("stem I", "stem II", "stem III")), features = c("A_ISC1"), cols = c("lightgrey", viridis(1)))
+FeaturePlot(subset(KPT_m, idents = c("stem I", "stem II", "stem III")), features = c("Q_ISC1"), cols = c("lightgrey", viridis(1)))
+
+VlnPlot(KPT_m, features = c("Ent_prox1"), pt.size = 0, cols = KPT_colors2) + NoLegend()
+VlnPlot(KPT_m, features = c("Ent_dist1"), pt.size = 0, cols = KPT_colors2) + NoLegend()
+VlnPlot(KPT_m, features = c("Stem1"), pt.size = 0, cols = KPT_colors2) + NoLegend()
+VlnPlot(KPT_m, features = c("Gob1"), pt.size = 0, cols = KPT_colors2) + NoLegend()
+VlnPlot(KPT_m, features = c("Pan1"), pt.size = 0, cols = KPT_colors2) + NoLegend()
+VlnPlot(KPT_m, features = c("EEC1"), pt.size = 0, cols = KPT_colors2) + NoLegend()
+
+VlnPlot(subset(KPT_m, idents = c("stem I", "stem II", "stem III")), features = c("ISCI1"), pt.size = 0, cols = KPT_colors2) + NoLegend()
+VlnPlot(subset(KPT_m, idents = c("stem I", "stem II", "stem III")), features = c("ISCII1"), pt.size = 0, cols = KPT_colors2) + NoLegend()
+VlnPlot(subset(KPT_m, idents = c("stem I", "stem II", "stem III")), features = c("ISCIII1"), pt.size = 0, cols = KPT_colors2) + NoLegend()
+
+VlnPlot(subset(KPT_m, idents = c("stem I", "stem II", "stem III")), features = c("G1S1"), pt.size = 0, cols = KPT_colors2) + NoLegend()
+VlnPlot(subset(KPT_m, idents = c("stem I", "stem II", "stem III")), features = c("G2M1"), pt.size = 0, cols = KPT_colors2) + NoLegend()
+
+VlnPlot(subset(KPT_m, idents = c("stem I", "stem II", "stem III")), features = c("A_ISC1"), pt.size = 0, cols = KPT_colors2) + NoLegend()
+VlnPlot(subset(KPT_m, idents = c("stem I", "stem II", "stem III")), features = c("Q_ISC1"), pt.size = 0, cols = KPT_colors2) + NoLegend()
+dev.off()
+
+# main idents
+Idents_table = FetchData(KPT_m, vars = c("annotate2", "Stem1", "Ent_prox1", "Gob1", "Pan1", "EEC1"))
+Idents_table$annotate2 = as.factor(Idents_table$annotate2)
+
+# For eff sizes
+n = 40
+cd.table = data.frame(ident = character(n), module = character(n), cd = numeric(n), stringsAsFactors = F)
+r = 1
+
+for(t in (2:6)) {
+  for (i in as.character(unique(Idents_table$annotate2))) {
+    m1 = dplyr::filter(Idents_table, annotate2 == i)[,t]
+    m2 = dplyr::filter(Idents_table, annotate2 != i)[,t]
+    cd = cohens_d(m1, m2)
+    cd.table[r,1] = i
+    cd.table[r,2] = colnames(Idents_table)[t]
+    cd.table[r,3] = cd
+    r = r + 1
+  }
+}
+
+m.cd = cd.table %>% dplyr::filter(cd > 0.5) %>% dplyr::filter(cd < 0.8)
+l.cd = cd.table %>% dplyr::filter(cd > 0.8) %>% dplyr::filter(cd < 1.2)
+vl.cd = cd.table %>% dplyr::filter(cd > 1.2) %>% dplyr::filter(cd < 2)
+h.cd = cd.table %>% dplyr::filter(cd > 2)
+
+#stem cell
+Idents_table = FetchData(subset(KPT_m, idents = c("stem I", "stem II", "stem III")), vars = c("annotate2", "ISCI1", "ISCII1", "ISCIII1"))
+Idents_table$annotate = as.factor(Idents_table$annotate2)
+
+# For eff sizes - stem
+n = 9
+cd.table = data.frame(ident = character(n), module = character(n), cd = numeric(n), stringsAsFactors = F)
+r = 1
+
+for(t in (2:4)) {
+  for (i in as.character(unique(Idents_table$annotate2))) {
+    m1 = dplyr::filter(Idents_table, annotate2 == i)[,t]
+    m2 = dplyr::filter(Idents_table, annotate2 != i)[,t]
+    cd = cohens_d(m1, m2)
+    cd.table[r,1] = i
+    cd.table[r,2] = colnames(Idents_table)[t]
+    cd.table[r,3] = cd
+    r = r + 1
+  }
+}
+
+m.cd = cd.table %>% dplyr::filter(cd > 0.5) %>% dplyr::filter(cd < 0.8)
+l.cd = cd.table %>% dplyr::filter(cd > 0.8) %>% dplyr::filter(cd < 1.2)
+vl.cd = cd.table %>% dplyr::filter(cd > 1.2) %>% dplyr::filter(cd < 2)
+h.cd = cd.table %>% dplyr::filter(cd > 2)
+
+
+```
+
+#### Extract out identities for plotting
+```{r}
+# update metadata
+KPT_m$time.treat = paste(KPT_m$time, KPT_m$treat, sep = "_")
+
+Number.table = data.frame(rbind(table(factor(KPT_m$annotate2)[which(KPT_m$time.treat == 'Day_0_none')]),
+                   table(factor(KPT_m$annotate2)[which(KPT_m$time.treat == 'Day_0.25_ctrl')]),
+                   table(factor(KPT_m$annotate2)[which(KPT_m$time.treat == 'Day_0.25_KPT330')]),
+                   table(factor(KPT_m$annotate2)[which(KPT_m$time.treat  == 'Day_1_ctrl')]),
+                   table(factor(KPT_m$annotate2)[which(KPT_m$time.treat  == 'Day_1_KPT330')]),
+                   table(factor(KPT_m$annotate2)[which(KPT_m$time.treat  == 'Day_2_ctrl')]),
+                   table(factor(KPT_m$annotate2)[which(KPT_m$time.treat  == 'Day_2_KPT330')]),
+                   table(factor(KPT_m$annotate2)[which(KPT_m$time.treat  == 'Day_3_ctrl')]),
+                   table(factor(KPT_m$annotate2)[which(KPT_m$time.treat == 'Day_3_KPT330')]),
+                   table(factor(KPT_m$annotate2)[which(KPT_m$time.treat == 'Day_4_ctrl')]),
+                   table(factor(KPT_m$annotate2)[which(KPT_m$time.treat == 'Day_4_KPT330')]),
+                   table(factor(KPT_m$annotate2)[which(KPT_m$time.treat  == 'Day_6_ctrl')]),
+                   table(factor(KPT_m$annotate2)[which(KPT_m$time.treat == 'Day_6_KPT330')])))
+
+rownames(Number.table)<-c("0","0.25_C","0.25_K","1_C","1_K","2_C","2_K","3_C","3_K","4_C","4_K","6_C","6_K")
+colnames(Number.table) = c("stem I", "stem II", "stem III", "early enterocyte", "enterocyte",
+              "early secretory", "early Paneth", "Paneth", "goblet", "enteroendocrine")
+
+Number.table = rownames_to_column(Number.table, "sample")
+
+Plot.table = gather(Number.table, "identity", "cell_number", 2:11)
+Plot.table = Plot.table %>% group_by(sample) %>% mutate(cell_frac = cell_number / sum(cell_number))
+Plot.table = separate(Plot.table, sample, c("time", "treat"), sep = "_")
+Plot.table = replace_na(Plot.table, list(treat = "none"))
+
+Plot.table$type = Plot.table$identity
+Plot.table = separate(Plot.table, type, c("nonpre", "pre"), sep = "_")
+Plot.table = separate(Plot.table, nonpre, c("mat", "stem"), sep = "I")
+Plot.table$stem[!is.na(Plot.table$stem)] = "stem"
+Plot.table$pre[!is.na(Plot.table$pre)] = "immature"
+Plot.table$stem[is.na(Plot.table$stem)] = ""
+Plot.table$pre[is.na(Plot.table$pre)] = ""
+
+Plot.table = Plot.table %>% unite(stem, pre, col = "state", sep = "")
+Plot.table$state[which(Plot.table$state == "")] = "mature"
+Plot.table$mat = NULL
+
+Plot.table = Plot.table %>% arrange(desc(state))
+
+Plot.table$identity = factor(Plot.table$identity, levels = rev(c("stem I", "stem II", "stem III", "early enterocyte", "enterocyte",
+              "early secretory", "early Paneth", "Paneth", "goblet", "enteroendocrine")))
+
+Plot.table.C = Plot.table %>% dplyr::filter(treat != "K")
+Plot.table.K = Plot.table %>% dplyr::filter(treat != "C")
+
+# For fisher's exact test
+fisher.table = c()
+
+for(t in c(0.25, 1, 2, 3, 4, 6)) {
+  Plot.table.C.t = Plot.table.C %>% dplyr::filter(time == t)
+  Plot.table.K.t = Plot.table.K %>% dplyr::filter(time == t)
+  
+  ident.C = Plot.table.C.t %>% dplyr::filter(cell_frac > 0.005)
+  ident.K = Plot.table.K.t %>% dplyr::filter(cell_frac > 0.005)
+  
+  idents = as.character(semi_join(ident.C[,3], ident.K[,3])$identity)
+  
+  for (i in idents) {
+    IC = as.numeric(dplyr::filter(Plot.table.C.t, identity == i)$cell_number)
+    AC = sum(as.numeric(dplyr::filter(Plot.table.C.t, identity != i)$cell_number))
+    
+    AOC = t(as.numeric(dplyr::filter(Plot.table.C.t, identity != i)$cell_number))
+    
+    IK = as.numeric(dplyr::filter(Plot.table.K.t, identity == i)$cell_number)
+    AK = sum(as.numeric(dplyr::filter(Plot.table.K.t, identity != i)$cell_number))
+    
+    AOK = t(as.numeric(dplyr::filter(Plot.table.K.t, identity != i)$cell_number))
+    
+    test_mat = matrix(c(IK, IC, AK, AC), nrow = 2,
+       dimnames = list(Treat = c("KPT", "CTRL"),
+                       Ident = c(i, "all others")))
+    
+    test_mat2 = matrix(c(IK, IC, AOK, AOC), nrow = 2,
+       dimnames = list(Treat = c("KPT", "CTRL"),
+                       Ident = c(i, t(as.character(dplyr::filter(Plot.table.C.t, identity != i)$identity)))))
+    
+    fish = fisher.test(test_mat, alternative = "two.sided")
+    
+    fisher.table = rbind(fisher.table, c(t,i,as.numeric(fish$estimate), fish$conf.int, fish$p.value))
+  }
+}
+
+colnames(fisher.table) = c("time", "identity", "odds_ratio", "95_lor", "95_uor", "p_value")
+fisher.table = as.data.frame(fisher.table, stringsAsFactors =F)
+fisher.table$time = as.numeric(fisher.table$time)
+fisher.table$odds_ratio = as.numeric(fisher.table$odds_ratio)
+fisher.table$`95_lor` = as.numeric(fisher.table$`95_lor`)
+fisher.table$`95_uor` = as.numeric(fisher.table$`95_uor`)
+fisher.table$p_value = as.numeric(fisher.table$p_value)
+fisher.table$identity = factor(fisher.table$identity, levels = c("stem I", "stem II", "stem III", "early enterocyte", "enterocyte",
+              "early secretory", "early Paneth", "Paneth", "goblet", "enteroendocrine"))
+
+fisher.table$adj_p_value = p.adjust(fisher.table$p_value, method = "fdr")
+
+write.csv(fisher.table, "2_Full annotation/KPT_m_fisher_test_composition_09102021.csv")
+
+signif1.fisher.table = fisher.table %>% dplyr::filter(adj_p_value < 0.05) %>% dplyr::filter(adj_p_value > 0.01)
+signif2.fisher.table = fisher.table %>% dplyr::filter(adj_p_value < 0.01) %>% dplyr::filter(adj_p_value > 0.001)
+signif3.fisher.table = fisher.table %>% dplyr::filter(adj_p_value < 0.001) %>% dplyr::filter(adj_p_value > 0.0001)
+signif4.fisher.table = fisher.table %>% dplyr::filter(adj_p_value < 0.0001)
+
+pdf('2_Full annotation/plots/20200206_KPT_m_OR2.pdf', useDingbats = F, width = 2, height = 6)
+
+ggplot(fisher.table, aes(x = time, y = odds_ratio, group = identity)) + 
+  geom_ribbon(aes(ymin = `95_lor`, ymax = `95_uor`), fill = 'lightgrey') + geom_line() +
+  theme_classic() + facet_grid(identity~., scales = "free") + geom_hline(aes(yintercept = 1), linetype = 2)
+
+ggplot(fisher.table, aes(x = time, y = odds_ratio, group = identity)) + 
+  geom_ribbon(aes(ymin = `95_lor`, ymax = `95_uor`), fill = 'lightgrey') + geom_line() +
+  theme_classic() + scale_y_log10() + facet_grid(identity~.) + geom_hline(aes(yintercept = 1), linetype = 2)
+
+dev.off()
+
+pdf('2_Full annotation/plots/20200620_KPT_m_TC.pdf', useDingbats = F, width = 1.5, height = 1.5)
+
+ggplot(Plot.table.C, aes(fill=identity, y=cell_frac, x=as.numeric(time), order = as.numeric(identity))) + 
+    geom_area(position="fill") + 
+    scale_fill_manual(values=rev(KPT_colors2)) +
+    labs(title = "Control") + theme_classic() + theme(legend.position = "none")
+ggplot(Plot.table.K, aes(fill=identity, y=cell_frac, x=as.numeric(time), order = as.numeric(identity))) + 
+    geom_area(position="fill") + 
+    scale_fill_manual(values=rev(KPT_colors2)) +
+    labs(title = "KPT-330") + theme_classic() + theme(legend.position = "none")
+
+ggplot(dplyr::filter(Plot.table.C, state == "stem"), aes(fill=identity, y=cell_frac, x=as.numeric(time), order = as.numeric(identity))) + 
+    geom_area(stat="identity") +
+    scale_fill_manual(values=rev(KPT_colors2[1:3])) +
+    labs(title = "Control") + theme_classic() + ylim(0, 1)+ theme(legend.position = "none")
+ggplot(dplyr::filter(Plot.table.K, state == "stem"), aes(fill=identity, y=cell_frac, x=as.numeric(time), order = as.numeric(identity))) + 
+    geom_area(stat="identity") +
+    scale_fill_manual(values=rev(KPT_colors2[1:3])) +
+    labs(title = "KPT-330") + theme_classic() + ylim(0, 1) + theme(legend.position = "none")
+
+ggplot(dplyr::filter(Plot.table.C, state != "stem"), aes(fill=identity, y=cell_frac, x=as.numeric(time), order = as.numeric(identity))) + 
+    geom_area(stat="identity") +
+    scale_fill_manual(values=rev(KPT_colors2[4:10])) +
+    labs(title = "Control") + theme_classic() + ylim(0, 1) + theme(legend.position = "none")
+ggplot(dplyr::filter(Plot.table.K, state != "stem"), aes(fill=identity, y=cell_frac, x=as.numeric(time), order = as.numeric(identity))) + 
+    geom_area(stat="identity") +
+    scale_fill_manual(values=rev(KPT_colors2[4:10])) +
+    labs(title = "KPT-330") + theme_classic() + ylim(0, 1) + theme(legend.position = "none")
+
+dev.off()
+```
+
+#### Plots for stem-cell modulation
+```{r}
+treat_cols = rev(c("#EB2626","#AAAAA9"))
+treat_cols2 = c("#EB2626","#AAAAA9", "#AAAAA9")
+
+# stem vs non
+KPT_m$stem_v_all = "stem"
+KPT_m$stem_v_all[which(KPT_m$annotate == c("stem I"))] = "stem I"
+KPT_m$stem_v_all[which(KPT_m$annotate == c("stem II"))] = "stem II"
+KPT_m$stem_v_all[which(KPT_m$annotate == c("stem III"))] = "stem III"
+KPT_m$stem_v_all[which(KPT_m$annotate != c("stem I", "stem II", "stem III"))] = "non-stem"
+stem_v_all.col = c("#AAAAA9", "#92D0AE", "#7CC24F", "#32601F")
+
+# Look @ NES / Xpo1 stuff
+pdf('2_Full annotation/plots/20200620_SCT_KPT_m_Xpo1_2.pdf', useDingbats = F, width = 3, height = 3)
+VlnPlot(subset(KPT_m, subset = treat != "KPT330"), "Xpo1", assay = "RNA", pt.size = 0, cols = KPT_colors2) + NoLegend()
+VlnPlot(subset(KPT_m, subset = treat != "KPT330"), "NES1", pt.size = 0, cols = KPT_colors2)+ NoLegend() +
+  geom_hline(aes(yintercept = median(subset(KPT_m, subset = treat != "KPT330")@meta.data$NES1)), linetype = 2)
+VlnPlot(subset(KPT_m, subset = treat != "KPT330"), "Xpo1", group.by = "stem_v_all", pt.size = 0, assay = "RNA", cols = stem_v_all.col) + NoLegend()
+VlnPlot(subset(KPT_m, subset = treat != "KPT330"), "NES1", group.by = "stem_v_all", pt.size = 0, cols = stem_v_all.col)+ NoLegend() + 
+  geom_hline(aes(yintercept = median(subset(KPT_m, subset = treat != "KPT330")@meta.data$NES1)), linetype = 2)
+VlnPlot(subset(KPT_m, subset = time == c("Day_0.25", "Day_1", "Day_2")), "Xpo1", assay = "RNA", pt.size = 0, split.by = "treat", cols = treat_cols) + NoLegend()
+VlnPlot(subset(KPT_m, subset = time != "Day_0" & stem_v_all != "non-stem"), "Xpo1", assay = "RNA", pt.size = 0, group.by = "time", split.by = "treat", cols = treat_cols) + NoLegend() + labs(title = "stem")
+VlnPlot(subset(KPT_m, subset = time != "Day_0" & stem_v_all == "non-stem"), "Xpo1", assay = "RNA", pt.size = 0, group.by = "time", split.by = "treat", cols = treat_cols) + NoLegend() + labs(title = "non-stem")
+dev.off()
+
+NES_table = FetchData(subset(KPT_m, subset = treat != "KPT330"), vars = c("rna_Xpo1", "stem_v_all", "NES1"))
+NES_table$stem_v_all = as.factor(NES_table$stem_v_all)
+DunnettTest(NES1 ~ stem_v_all, data = NES_table, control = "non-stem")
+
+xpo_stemI_out = FindMarkers(subset(KPT_m, subset = treat != "KPT330"), feature = "Xpo1", ident.1 = "stem I", ident.2 = "non-stem", group.by = "stem_v_all", test.use = "wilcox", assay = "RNA", verbose = F, logfc.threshold = 0)
+xpo_stemII_out = FindMarkers(subset(KPT_m, subset = treat != "KPT330"), feature = "Xpo1", ident.1 = "stem II", ident.2 = "non-stem", group.by = "stem_v_all", test.use = "wilcox", assay = "RNA", verbose = F, logfc.threshold = 0)
+xpo_stemIII_out = FindMarkers(subset(KPT_m, subset = treat != "KPT330"), feature = "Xpo1", ident.1 = "stem III", ident.2 = "non-stem", group.by = "stem_v_all", test.use = "wilcox", assay = "RNA", verbose = F, logfc.threshold = 0)
+
+# Early stem DE
+stem.KPT.response = read_csv("2_Full annotation/20200127_DE_early_stem_KPT.csv")
+
+colnames(stem.KPT.response)[1] = "gene"
+
+stem.KPT.response.filter = stem.KPT.response %>%
+  dplyr::filter(abs(avg_logFC) > 2*sd(stem.KPT.response$avg_logFC)) %>%
+  dplyr::filter(p_val_adj <  0.05)
+
+
+# Add modules for early stem DE
+nbin = 25
+ctrl = 100
+stemDE_up = as.data.frame(dplyr::filter(stem.KPT.response.filter, avg_logFC > 0)$gene)
+KPT_m = AddModuleScore(KPT_m, stemDE_up, nbin = nbin, ctrl = ctrl, name = "stemDE_up", assay = "RNA")
+KPT_m$stemDE_up1 = rescale(KPT_m$stemDE_up1)
+
+stemDE_down = as.data.frame(dplyr::filter(stem.KPT.response.filter, avg_logFC < 0)$gene)
+KPT_m = AddModuleScore(KPT_m, stemDE_down, nbin = nbin, ctrl = ctrl, name = "stemDE_down", assay = "RNA")
+KPT_m$stemDE_down1 = rescale(KPT_m$stemDE_down1)
+
+stemDE_table = FetchData(subset(KPT_m, subset = time != "Day_0"), vars = c("annotate2", "treat", "stemDE_up1", "stemDE_down1"))
+
+# build cohen array
+n = 10
+stemDE_cohen = data.frame(ident = c("stem I", "stem II", "stem III", "early enterocyte", "enterocyte",
+              "early secretory", "early Paneth", "Paneth", "goblet", "enteroendocrine"), stem_DE_up = numeric(n),
+              stem_DE_down = numeric(n), stringsAsFactors = F)
+for (i in 1:n) {
+  stemDE_cohen[i,2] = -cohens_d(stemDE_up1 ~ treat, data = dplyr::filter(stemDE_table, annotate2 == stemDE_cohen[i,1]))
+  stemDE_cohen[i,3] = -cohens_d(stemDE_down1 ~ treat, data = dplyr::filter(stemDE_table, annotate2 == stemDE_cohen[i,1]))
+}
+
+write.csv(stemDE_cohen, "2_Full annotation/20200620_DE_early_stem_KPT_cohen2.csv")
+
+pdf('2_Full annotation/plots/20200620_SCT_KPT_m_stemDE2.pdf', useDingbats = F, width = 3, height = 3)
+VlnPlot(subset(KPT_m, subset = time != "Day_0"), features = "stemDE_up1", pt.size = 0, 
+        split.by = "treat", cols = treat_cols, split.plot = T) + NoLegend()
+VlnPlot(subset(KPT_m, subset = time != "Day_0"), features = "stemDE_down1", pt.size = 0, 
+        split.by = "treat", cols = treat_cols, split.plot = T) + NoLegend()
+dev.off()
+
+pdf('2_Full annotation/plots/20200620_SCT_KPT_m_DEgenes2.pdf', useDingbats = F, width = 8, height = 8)
+DotPlot(subset(KPT_m, subset = time != "Day_0"), 
+        features = rev(c("Xpo1", "Atf3", "Trp53", "Ccnd1", "Cdk4", "Cdk6", "Cdkn1a")), 
+        split.by = "treat", assay = "RNA", dot.scale = 8, cols = c("lightgrey", viridis(1)))
+dev.off()
+
+pdf('2_Full annotation/plots/20200620_SCT_KPT_m_stem_genes2.pdf', useDingbats = F, width = 10, height = 3)
+# ERK / JNK / p38 / NFAT / AP-1 / ATF / AuroraK
+DotPlot(subset(KPT_m, subset = treat != "KPT330"), 
+        features = rev(c("Mapk1", "Mapk3",
+                         "Mapk8", "Mapk9",
+                         "Mapk10", "Mapk11", "Mapk12", "Mapk13", "Mapk14",
+                         "Nfatc3",
+                         "Fos", "Jun", 
+                         "Atf1", "Atf2", "Atf3", "Atf4", "Atf5", "Atf6",
+                         "Aurka", "Aurkb")), 
+        group.by = "stem_v_all", assay = "RNA", dot.scale = 8, cols = c("lightgrey", viridis(1)))
+
+dev.off()
+
+# Look @ quiesence
+pdf('2_Full annotation/plots/20200620_SCT_KPT_m_Quies2.pdf', useDingbats = F, width = 3, height = 3)
+VlnPlot(subset(KPT_m, subset = time == c("Day_0.25", "Day_1", "Day_2"), idents = c("stem II", "stem III")), features = c("A_ISC1"), group.by = "treat", pt.size = 0, cols = treat_cols) + NoLegend()
+VlnPlot(subset(KPT_m, subset = time == c("Day_0.25", "Day_1", "Day_2"), idents = c("stem II", "stem III")), features = c("Q_ISC1"), group.by = "treat", pt.size = 0, cols = treat_cols) + NoLegend()
+dev.off()
+
+Quies_table = FetchData(subset(KPT_m, subset = time == c("Day_0.25", "Day_1", "Day_2"), idents = c("stem II", "stem III")), vars = c("treat", "A_ISC1", "Q_ISC1"))
+Quies_table$treat = as.factor(Quies_table$treat)
+cohens_d(A_ISC1 ~ treat, data = Quies_table)
+cohens_d(Q_ISC1 ~ treat, data = Quies_table)
+t.test(A_ISC1 ~ treat, data = Quies_table, alternative = "two.sided", var.equal = F)
+t.test(Q_ISC1 ~ treat, data = Quies_table, alternative = "two.sided", var.equal = F)
+
+```
+
+#### Run Progeny
+```{r}
+KPT_m = progeny(KPT_m, scale=F, organism="Mouse", top=300, perm=1, assy_name = "RNA", return_assay = T)
+KPT_m = ScaleData(KPT_m, assay = "progeny")
+
+# build out datasets
+CellsClusters = data.frame(Cell = names(Idents(KPT_m)), CellType = as.character(Idents(KPT_m)), stringsAsFactors = F)
+Treat = data.frame(Cell = rownames(KPT_m@meta.data), Treat = as.character(KPT_m@meta.data$treat), stringsAsFactors = F)
+Treat[Treat == "none"] = "ctrl"
+Time = data.frame(Cell = rownames(KPT_m@meta.data), Time = as.character(KPT_m@meta.data$time), stringsAsFactors = F)
+
+progeny_scores_df = as.data.frame(t(GetAssayData(KPT_m, slot = "scale.data", assay = "progeny"))) %>%
+    rownames_to_column("Cell") %>% gather(Pathway, Activity, -Cell)
+progeny_scores_df = inner_join(progeny_scores_df, CellsClusters) %>% inner_join(Treat) %>% inner_join(Time)
+
+#heatmap of all control cells
+summarized_progeny_scores = progeny_scores_df %>% dplyr::filter(Treat == "ctrl") %>%
+    group_by(Pathway, CellType) %>%
+    summarise(avg = mean(Activity), std = sd(Activity))
+
+summarized_progeny_scores_df = summarized_progeny_scores %>%
+    dplyr::select(-std) %>%
+    spread(Pathway, avg) %>%
+    data.frame(row.names = 1, check.names = F, stringsAsFactors = F)
+
+summarized_progeny_scores_df = summarized_progeny_scores_df[rev(c("stem I", "stem II", "stem III", "early enterocyte", "enterocyte",
+              "early secretory", "early Paneth", "Paneth", "goblet", "enteroendocrine")),]
+
+pdf('2_Full annotation/plots/20200622_KPT_m_Progeny_ctrl_heat2.pdf', useDingbats = F, width = 8, height = 4)
+superheat(summarized_progeny_scores_df,
+          scale = T,
+          col.dendrogram = T,
+          left.label.col = rev(KPT_colors2),
+          left.label.text.size = 4,
+          left.label.size = 0.3,
+          bottom.label.col = "white",
+          bottom.label.text.size = 3,
+          bottom.label.size = 0.6,
+          pretty.order.cols = T,
+          bottom.label.text.angle = 90,
+          grid.hline.col = "white",
+          grid.vline.col = "white",
+          heat.pal = viridis(3, option = "B"),
+          legend.text.size = 10)
+dev.off()
+
+# build cohen's D array cell/pathway
+progenyDE_cohen = data.frame(CellType = character(), Pathway = character(), cohensD = numeric(), stringsAsFactors = F)
+i = 1
+
+for (cell in unique(progeny_scores_df$CellType)) {
+  score_df_c = dplyr::filter(progeny_scores_df, CellType == cell)
+  
+  for (pathway in unique(score_df_c$Pathway)) {
+    progenyDE_cohen[i,1] = cell
+    progenyDE_cohen[i,2] = pathway
+    progenyDE_cohen[i,3] = -cohens_d(Activity ~ Treat, data = dplyr::filter(score_df_c, Pathway == pathway))
+    i = i+1
+  }
+}
+
+sig_progenyDE_cohen = dplyr::filter(progenyDE_cohen, abs(cohensD) > 0.2)
+
+order = rev(c("stem I", "stem II", "stem III", "early enterocyte", "enterocyte",
+              "early secretory", "early Paneth", "Paneth", "goblet", "enteroendocrine"))
+
+progenyDE_cohen = progenyDE_cohen %>%
+    spread(Pathway, cohensD) %>%
+    data.frame(check.names = F, stringsAsFactors = F) %>%
+    slice(match(order, CellType)) %>%
+    column_to_rownames(var = 'CellType')
+
+progenyDE_cohen_filter = progenyDE_cohen
+progenyDE_cohen_filter = progenyDE_cohen_filter[,
+  c("PI3K", "Trail", "Estrogen", "VEGF", "WNT", "NFkB", "TNFa", "Hypoxia", "Androgen", "p53", "JAK-STAT", "TGFb", "EGFR", "MAPK")]
+is.na(progenyDE_cohen_filter) = abs(progenyDE_cohen_filter) < 0.2
+
+pdf('2_Full annotation/plots/20200622_KPT_m_Progeny_cohensD_heat2.pdf', useDingbats = F, width = 8, height = 4)
+superheat(progenyDE_cohen,
+          col.dendrogram = T,
+          left.label.col = rev(KPT_colors2),
+          left.label.text.size = 4,
+          left.label.size = 0.3,
+          bottom.label.col = "white",
+          bottom.label.text.size = 3,
+          bottom.label.size = 0.6,
+          pretty.order.cols = T,
+          bottom.label.text.angle = 90,
+          grid.hline.col = "white",
+          grid.vline.col = "white",
+          heat.pal = viridis(3, option = "B"),
+          heat.lim = c(-0.8, 0.5),
+          legend.text.size = 10)
+
+superheat(progenyDE_cohen_filter,
+          left.label.col = rev(KPT_colors2),
+          left.label.text.size = 4,
+          left.label.size = 0.3,
+          bottom.label.col = "white",
+          bottom.label.text.size = 3,
+          bottom.label.size = 0.6,
+          bottom.label.text.angle = 90,
+          grid.hline.col = "white",
+          grid.vline.col = "white",
+          heat.pal = viridis(3, option = "B"),
+          heat.lim = c(-0.8, 0.5),
+          legend.text.size = 10)
+dev.off()
+
+# build cohen's D array time/cell/pathway
+progenyDE_cohen = data.frame(CellType = character(), Time = character(), Pathway = character(), cohensD = numeric(), stringsAsFactors = F)
+i = 1
+
+for (time in unique(progeny_scores_df$Time)[-1]) {
+  score_df = dplyr::filter(progeny_scores_df, Time == time)
+  cells = score_df %>% dplyr::filter(Pathway == "EGFR") %>% 
+    unite(CellType, Treat, col = "Treat", sep = "_") %>% group_by(Treat) %>% summarise(num = n())
+  cells = cells %>% separate(Treat, sep = "_", into = c("CellType","Treat")) %>% dplyr::filter(num > 50)
+  cells = unique(dplyr::intersect(dplyr::filter(cells, Treat == "ctrl")[,1], dplyr::filter(cells, Treat != "ctrl")[,1])$CellType)
+  
+  for (cell in cells) {
+    score_df_c = dplyr::filter(score_df, CellType == cell)
+    
+    for (pathway in unique(score_df_c$Pathway)) {
+      progenyDE_cohen[i,1] = cell
+      progenyDE_cohen[i,2] = time
+      progenyDE_cohen[i,3] = pathway
+      progenyDE_cohen[i,4] = -cohens_d(Activity ~ Treat, data = dplyr::filter(score_df_c, Pathway == pathway))
+      i = i+1
+    }
+  }
+}
+
+pways =  c("MAPK", "EGFR", "TGFb", "PI3K", "Trail", "Hypoxia")
+stemII_pways = dplyr::filter(progenyDE_cohen, CellType == "stem II") %>% dplyr::filter(Pathway %in% pways)
+stemIII_pways = dplyr::filter(progenyDE_cohen, CellType == "stem III") %>% dplyr::filter(Pathway %in% pways)
+
+pdf('2_Full annotation/plots/20200622_KPT_m_Progeny_cohenD_stemII_III2.pdf', useDingbats = F, width = 6, height = 10)
+
+ggplot(stemII_pways, aes(x = Time, y = cohensD, group = Pathway)) + 
+  geom_col() + theme_classic() + facet_grid(Pathway~.) + 
+  geom_hline(aes(yintercept = 0), linetype = 1) +
+  geom_hline(aes(yintercept = 0.2), linetype = 2) +
+  geom_hline(aes(yintercept = -0.2), linetype = 2)
+
+ggplot(stemIII_pways, aes(x = Time, y = cohensD, group = Pathway)) + 
+  geom_col() + theme_classic() + facet_grid(Pathway~.) + 
+  geom_hline(aes(yintercept = 0), linetype = 1) +
+  geom_hline(aes(yintercept = 0.2), linetype = 2) +
+  geom_hline(aes(yintercept = -0.2), linetype = 2)
+
+VlnPlot(subset(KPT_m, subset = time == c("Day_0.25", "Day_1"), idents = c("stem II")), features = pways, group.by = "time", split.by = "treat", pt.size = 0, cols = treat_cols, assay = "progeny", split.plot = T) + NoLegend()
+
+VlnPlot(subset(KPT_m, subset = time == c("Day_0.25", "Day_1"), idents = c("stem III")), features = pways, group.by = "time", split.by = "treat", pt.size = 0, cols = treat_cols, assay = "progeny", split.plot = T) + NoLegend()
+
+dev.off()
+
+```
+
+#### Run Dorothea
+```{r}
+dorothea_regulon = get(data("dorothea_mm", package = "dorothea"))
+
+## We obtain the regulons based on interactions with confidence level A, B and C
+regulon = dorothea_regulon %>% dplyr::filter(confidence %in% c("A","B","C"))
+
+## We compute Viper Scores 
+KPT_m = run_viper(KPT_m, regulon,
+                  options = list(method = "scale", minsize = 10, eset.filter = F, cores = 8, verbose = F))
+
+# Save Dorothea'd object
+saveRDS(KPT_m, '2_Full annotation/SCT_KPT_m_2_doro_20200622.rds', compress= T)
+KPT_m = readRDS('2_Full annotation/SCT_KPT_m_2_doro_20200622.rds')
+
+# Umap of TF's
+
+KPT_m = ScaleData(KPT_m, assay = "dorothea")
+KPT_m = RunPCA(KPT_m, features = rownames(KPT_m@assays$dorothea@data), assay = "dorothea", verbose = F)
+
+DefaultAssay(KPT_m) = "dorothea"
+KPT_m = FindNeighbors(KPT_m, dims = 1:7, verbose = F)
+KPT_m = FindClusters(KPT_m, resolution = 0.45, verbose = F)
+KPT_m = RunUMAP(KPT_m, dims = 1:7, umap.method = "umap-learn")
+
+KPT_m.d_markers = FindAllMarkers(KPT_m, assay = "dorothea", min.pct = 0.25, logfc.threshold = 0.25)
+top10 = KPT_m.d_markers %>% group_by(cluster) %>% top_n(10, avg_logFC)
+write.csv(KPT_m.d_markers, "2_Full annotation/KPT_m_2_dorothea_markers_06222020.csv")
+ds_cells = Cells(subset(KPT_m, downsample = 500))
+
+doro_colors = brewer.pal(n=7, name = "Set2")
+treat_cols3 = c("#EB2626","#AAAAA9", "#D6D6D6")
+KPT_m@meta.data$treat = factor(KPT_m@meta.data$treat, levels = c("KPT330", "ctrl", "none"))
+
+pdf('2_Full annotation/plots/20200612_SCT_KPT_m_2_dorothea.pdf', useDingbats = F, width = 5, height = 5)
+DimPlot(KPT_m, reduction = "umap", label = T, pt.size = 0.5, cols = doro_colors) + NoLegend()
+DimPlot(KPT_m, reduction = "umap", label = F, pt.size = 0.5, group.by = "time", cols = rev(viridis(7))) + NoLegend()
+DimPlot(KPT_m, reduction = "umap", label = T, pt.size = 0.5, group.by = "annotate2", cols = KPT_colors2) + NoLegend()
+DimPlot(KPT_m, reduction = "umap", label = T, pt.size = 0.5, group.by = "treat", cols = treat_cols3) + NoLegend()
+
+DimPlot(subset(KPT_m, subset = annotate == c("stem II", "stem III")), reduction = "umap", label = T, pt.size = 0.5, group.by = "annotate2", cols = KPT_colors2[2:3]) + NoLegend()
+DimPlot(subset(KPT_m, subset = annotate == c("stem II", "stem III")), reduction = "umap", label = T, pt.size = 0.5, group.by = "treat", cols = treat_cols3) + NoLegend()
+dev.off()
+
+pdf('2_Full annotation/plots/20200612_SCT_KPT_m_2_dorothea_hmap.pdf', useDingbats = F, width = 10, height = 10)
+DoHeatmap(KPT_m, top10$gene, ds_cells, raster = F, label = F, assay = "dorothea", group.colors = doro_colors) +
+  scale_fill_viridis(option = "B")
+dev.off()
+
+# Stem DE testing
+stem.KPT.TF.response = FindMarkers(
+  subset(KPT_m, subset = annotate == c("stem II", "stem III")),
+  ident.1 = "KPT330", group.by = "treat", logfc.threshold = 0, test.use = "wilcox", min.pct = 0.2, assay = "dorothea")
+
+stem.KPT.TF.top = stem.KPT.TF.response %>% rownames_to_column(var = "gene") %>%
+  dplyr::filter(abs(avg_logFC) > 2*sd(stem.KPT.TF.response$avg_logFC)) %>%
+  dplyr::filter(p_val_adj <  0.05)
+
+write.csv(stem.KPT.TF.response, "2_Full annotation/20200612_DE_stem_KPT_dorothea.csv")
+
+# look at dorothea cluster composition
+KPT_m$dorothea_clust = Idents(KPT_m)
+
+doro.table =c()
+
+for (t in unique(KPT_m$treat)){
+  sub = subset(KPT_m, subset = treat == t)
+  
+  anno.table = data.frame(rbind(table(factor(sub$annotate2)[which(sub$dorothea_clust == '0')]),
+                   table(factor(sub$annotate2)[which(sub$dorothea_clust == '1')]),
+                   table(factor(sub$annotate2)[which(sub$dorothea_clust == '2')]),
+                   table(factor(sub$annotate2)[which(sub$dorothea_clust  == '3')]),
+                   table(factor(sub$annotate2)[which(sub$dorothea_clust  == '4')]),
+                   table(factor(sub$annotate2)[which(sub$dorothea_clust  == '5')]),
+                   table(factor(sub$annotate2)[which(sub$dorothea_clust  == '6')])))
+  
+  rownames(anno.table) = c("0","1","2","3","4","5","6")
+  colnames(anno.table) = c("stem I", "stem II", "stem III", "early_enterocyte", "enterocyte",
+              "early_secretory", "early_Paneth", "Paneth", "goblet", "enteroendocrine")
+  anno.table = rownames_to_column(anno.table, "doro_clust")
+  Plot.table = gather(anno.table, "identity", "cell_number", 2:11)
+  
+  Plot.table$treat = t
+  
+  doro.table = bind_rows(doro.table, Plot.table)
+}
+
+doro.table$identity = factor(doro.table$identity, levels = rev(c("stem I", "stem II", "stem III", "early_enterocyte", "enterocyte",
+            "early_secretory", "early_Paneth", "Paneth", "goblet", "enteroendocrine")))
+doro.table$treat = factor(doro.table$treat, levels = rev(c("KPT330", "ctrl", "none")))
+
+anno.table = doro.table %>%
+             unite(doro_clust, identity, col = 'id', sep = '/') %>%
+             group_by(id) %>% 
+             summarise(cell_number = sum(cell_number)) %>%
+             separate(id, sep = '/', into = c('doro_clust','identity'))
+
+anno.table$identity = factor(anno.table$identity, levels = rev(c("stem I", "stem II", "stem III", "early_enterocyte", "enterocyte",
+            "early_secretory", "early_Paneth", "Paneth", "goblet", "enteroendocrine")))
+
+treat.table = doro.table %>%
+             unite(doro_clust, treat, col = 'id', sep = '/') %>%
+             group_by(id) %>% 
+             summarise(cell_number = sum(cell_number)) %>%
+             separate(id, sep = '/', into = c('doro_clust','identity'))
+
+treat.table$identity = factor(treat.table$identity, levels = rev(c("KPT330", "ctrl", "none")))
+
+pdf('2_Full annotation/plots/20200622_KPT_m_2_doro_TC.pdf', useDingbats = F, width = 3, height = 3)
+ggplot(anno.table,
+       aes(fill=identity, y=cell_number, x=as.numeric(doro_clust), order = as.numeric(identity))) + 
+    geom_bar(position="fill", stat = "identity") + 
+    scale_fill_manual(values=rev(KPT_colors2)) +
+    labs(title = "Composition") + theme_classic() + theme(legend.position = "none")
+
+ggplot(treat.table, 
+       aes(fill=identity, y=cell_number, x=as.numeric(doro_clust), order = as.numeric(identity))) + 
+    geom_bar(position="fill", stat = "identity") + 
+    scale_fill_manual(values=rev(treat_cols3)) +
+    labs(title = "Treatment") + theme_classic() + theme(legend.position = "none")
+dev.off()
+
+# For fisher's exact test
+fisher.table = c()
+
+Plot.table.C = doro.table %>% dplyr::filter(treat != "KPT330") %>%
+               unite(doro_clust, identity, col = 'id', sep = '/') %>%
+               group_by(id) %>% 
+               summarise(cell_number = sum(cell_number)) %>%
+               separate(id, sep = '/', into = c('doro_clust','identity'))
+Plot.table.K = doro.table %>% dplyr::filter(treat == "KPT330")
+
+for(i in unique(pull(doro.table, identity))) {
+  Plot.table.C.i = Plot.table.C %>% dplyr::filter(identity == i)
+  Plot.table.K.i = Plot.table.K %>% dplyr::filter(identity == i)
+  
+  clust.C = Plot.table.C.i %>% dplyr::filter(cell_number > 9)
+  clust.K = Plot.table.K.i %>% dplyr::filter(cell_number > 9)
+  
+  clust = as.character(intersect(pull(clust.C, doro_clust),pull(clust.K, doro_clust)))
+  
+  for(c in clust) {
+  
+    IC = sum(as.numeric(dplyr::filter(Plot.table.C.i, doro_clust == c)$cell_number))
+    AC = sum(as.numeric(dplyr::filter(Plot.table.C.i, doro_clust != c)$cell_number))
+    
+    IK = sum(as.numeric(dplyr::filter(Plot.table.K.i, doro_clust == c)$cell_number))
+    AK = sum(as.numeric(dplyr::filter(Plot.table.K.i, doro_clust != c)$cell_number))
+    
+    test_mat = matrix(c(IK, IC, AK, AC), nrow = 2,
+       dimnames = list(Treat = c("KPT", "CTRL"),
+                       Ident = c(i, "all others")))
+    
+    fish = fisher.test(test_mat, alternative = "two.sided")
+    
+    fisher.table = rbind(fisher.table, c(i,c,as.numeric(fish$estimate), fish$conf.int, fish$p.value))
+  }
+}
+
+colnames(fisher.table) = c("identity", "doro_clust", "odds_ratio", "95_lor", "95_uor", "p_value")
+fisher.table = as.data.frame(fisher.table, stringsAsFactors =F)
+fisher.table$doro_clust = as.numeric(fisher.table$doro_clust)
+fisher.table$odds_ratio = as.numeric(fisher.table$odds_ratio)
+fisher.table$`95_lor` = as.numeric(fisher.table$`95_lor`)
+fisher.table$`95_uor` = as.numeric(fisher.table$`95_uor`)
+fisher.table$p_value = as.numeric(fisher.table$p_value)
+fisher.table$identity = factor(fisher.table$identity, levels = c("stem I", "stem II", "stem III", "early_enterocyte", "enterocyte",
+              "early_secretory", "early_Paneth", "Paneth", "goblet", "enteroendocrine"))
+
+fisher.table$adj_p_value = p.adjust(fisher.table$p_value, method = "fdr")
+
+write.csv(fisher.table, "2_Full annotation/KPT_m_fisher_test_dorothea_09102021.csv")
+
+signif1.fisher.table = fisher.table %>% dplyr::filter(adj_p_value < 0.05) %>% dplyr::filter(adj_p_value > 0.01)
+signif2.fisher.table = fisher.table %>% dplyr::filter(adj_p_value < 0.01) %>% dplyr::filter(adj_p_value > 0.001)
+signif3.fisher.table = fisher.table %>% dplyr::filter(adj_p_value < 0.001) %>% dplyr::filter(adj_p_value > 0.0001)
+signif4.fisher.table = fisher.table %>% dplyr::filter(adj_p_value < 0.0001)
+
+pdf('2_Full annotation/plots/20200724_KPT_m_dorothea_OR2.pdf', useDingbats = F, width = 2, height = 6)
+
+ggplot(fisher.table, aes(x = doro_clust, y = odds_ratio, ymin = `95_lor`, ymax = `95_uor`, group = identity)) + 
+  geom_pointrange(size = 0.25) + theme_classic() + scale_y_log10() + facet_grid(identity~.) + geom_hline(aes(yintercept = 1), linetype = 2)
+
+dev.off()
+```
+
+#### Merged matrix for Alexandria submission
+```{r}
+KPT_m = readRDS('2_Full annotation/SCT_KPT_m_2_doro_20200622.rds')
+
+#Extract out log norm + raw counts
+raw_df = as.data.frame(as.matrix(KPT_m@assays$RNA@data))
+rownames = row.names(raw_df)
+raw_df_with_rownames = data.frame(GENE = rownames, raw_df)
+colnames(raw_df_with_rownames) = c('GENE', colnames(raw_df))
+raw_exp_filename = "2_Full annotation/alexandria/mu_org_KPT_normalized_expression_counts.csv.gz"
+write.csv.gz(x=raw_df_with_rownames, file=raw_exp_filename, quote = F,row.names = F)
+
+raw_df = as.data.frame(as.matrix(KPT_m@assays$RNA@counts))
+rownames = row.names(raw_df)
+raw_df_with_rownames = data.frame(GENE = rownames, raw_df)
+colnames(raw_df_with_rownames) = c('GENE', colnames(raw_df))
+raw_exp_filename = "2_Full annotation/alexandria/mu_org_KPT_raw_expression_counts.csv.gz"
+write.csv.gz(x=raw_df_with_rownames, file=raw_exp_filename, quote = F,row.names = F)
+
+#Extract out UMAP coord
+umap = rownames_to_column(as.data.frame(as.matrix(KPT_m@reductions$umap@cell.embeddings)), var = "NAME")
+umap = bind_cols(umap, as.data.frame(KPT_m@meta.data$annotate2), as.data.frame(KPT_m@meta.data$treat), as.data.frame(KPT_m@meta.data$time))
+umap$cell_subset = umap$`KPT_m@meta.data$annotate2`
+umap$`KPT_m@meta.data$annotate2` = NULL
+umap$time = umap$`KPT_m@meta.data$time`
+umap$`KPT_m@meta.data$time` = NULL
+umap$treat = umap$`KPT_m@meta.data$treat`
+umap$`KPT_m@meta.data$treat` = NULL
+
+filename = "2_Full annotation/alexandria/mu_org_KPT_UMAP_coord.csv"
+write.csv(x=umap, file=filename, quote = F,row.names = F)
+
+#finalize metadata
+metadata = KPT_m@meta.data[,c(1:3,5,7:8,14:15,18:23,29:32,35:36)]
+metadata$biosample_id = metadata$orig.ident
+metadata$orig.ident = NULL
+metadata$percent_mito = metadata$percent.mt
+metadata$percent.mt = NULL
+metadata$donor_id = 1 
+metadata$cell_subset = metadata$annotate2
+metadata$annotate2 = NULL
+metadata$sex = 'male'
+
+metadata$species = 'NCBITaxon_10090'
+metadata$species__ontology_label = 'Mus musculus'
+metadata$disease = 'PATO_0000461'
+metadata$disease__ontology_label = 'normal'
+metadata$organ = 'UBERON_0002114'
+metadata$organ__ontology_label = 'duodenum'
+metadata$library_preparation_protocol = 'EFO_0008919'
+metadata$library_preparation_protocol__ontology_label = 'Seq-Well'
+
+metadata = rownames_to_column(metadata, var = "NAME")
+filename = "2_Full annotation/alexandria/mu_intest_metadata.csv"
+write.csv(x=metadata, file=filename, quote = F,row.names = F)
+
+```
+
