@@ -1,0 +1,795 @@
+---
+title: "KPT-org (Hu) SeqWell"
+author: "BEM"
+---
+
+### Metadata
+
+* Human organoids (Sato protocol) +/- 160 nM KPT-330 over 6 days
+* All donor/treat organoids pooled+hashed run on 4 identical seq-well arrays per V4 protocol, all seq'd on Next-seq 
+* seq-well runs:
+  + Samples 1-4
+
+### Preprocessing
+
+Seurat V3 objects (per array) following DropSeq QC + Doublet removal (hashing demulti) - Combining + annotating with SCT
+
+#### Load packages
+```{r setup, include=FALSE}
+Sys.setenv(PATH = paste("/Users/bemead/anaconda3/bin", Sys.getenv("PATH"), sep=":"))
+library(tidyverse, quietly = T)
+library(Seurat, quietly = T)
+library(DescTools)
+library(scales)
+library(ggplot2)
+library(superheat)
+library(Matrix)
+library(piano)
+library(RColorBrewer)
+library(viridis)
+library(effectsize)
+library(crunch)
+library(progeny)
+library(dorothea)
+library(viper)
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+#### Merged matrix for Alexandria submission
+```{r}
+KPT_m = readRDS('2_Full annotation/SCT_HuOrgKPT_m_20210211.rds')
+
+#Extract out log norm + raw counts
+raw_df = as.data.frame(as.matrix(KPT_m@assays$RNA@data))
+rownames = row.names(raw_df)
+raw_df_with_rownames = data.frame(GENE = rownames, raw_df)
+colnames(raw_df_with_rownames) = c('GENE', colnames(raw_df))
+raw_exp_filename = "2_Full annotation/alexandria/hu_org_KPT_normalized_expression_counts.csv.gz"
+write.csv.gz(x=raw_df_with_rownames, file=raw_exp_filename, quote = F,row.names = F)
+
+raw_df = as.data.frame(as.matrix(KPT_m@assays$RNA@counts))
+rownames = row.names(raw_df)
+raw_df_with_rownames = data.frame(GENE = rownames, raw_df)
+colnames(raw_df_with_rownames) = c('GENE', colnames(raw_df))
+raw_exp_filename = "2_Full annotation/alexandria/hu_org_KPT_raw_expression_counts.csv.gz"
+write.csv.gz(x=raw_df_with_rownames, file=raw_exp_filename, quote = F,row.names = F)
+
+#Extract out UMAP coord
+umap = rownames_to_column(as.data.frame(as.matrix(KPT_m@reductions$umap@cell.embeddings)), var = "NAME")
+umap = bind_cols(umap, as.data.frame(KPT_m@meta.data$annotate), as.data.frame(KPT_m@meta.data$treat), as.data.frame(KPT_m@meta.data$donor))
+umap$cell_subset = umap$`KPT_m@meta.data$annotate`
+umap$`KPT_m@meta.data$annotate` = NULL
+umap$donor_id = umap$`KPT_m@meta.data$donor`
+umap$`KPT_m@meta.data$donor` = NULL
+umap$treat = umap$`KPT_m@meta.data$treat`
+umap$`KPT_m@meta.data$treat` = NULL
+
+filename = "2_Full annotation/alexandria/hu_org_KPT_UMAP_coord.csv"
+write.csv(x=umap, file=filename, quote = F,row.names = F)
+
+#finalize metadata
+metadata = KPT_m@meta.data[,c(6:7,12:13,33)]
+metadata$biosample_id = metadata$hash.ID 
+metadata$hash.ID = NULL
+metadata$donor[which(metadata$donor == 3)] = 2
+metadata$donor[which(metadata$donor == 4)] = 3
+metadata$donor_id = metadata$donor 
+metadata$donor = NULL
+metadata$cell_subset = metadata$annotate
+metadata$annotate = NULL
+metadata$sex = 'female'
+metadata$sex[which(metadata$donor == 3)] = 'male'
+
+metadata$species = 'NCBITaxon_9606'
+metadata$species__ontology_label = 'Homo sapiens'
+metadata$disease = 'PATO_0000461'
+metadata$disease__ontology_label = 'normal'
+metadata$organ = 'UBERON_0002114'
+metadata$organ__ontology_label = 'duodenum'
+metadata$library_preparation_protocol = 'EFO_0008919'
+metadata$library_preparation_protocol__ontology_label = 'Seq-Well'
+
+metadata = rownames_to_column(metadata, var = "NAME")
+filename = "2_Full annotation/alexandria/Hu_intest_metadata.csv"
+write.csv(x=metadata, file=filename, quote = F,row.names = F)
+
+```
+
+#### SCTransform | PCA | Cluster | Project
+```{r}
+# Load Objects 
+KPT_m = readRDS('1_Preprocess/HuOrgKPT_QC_DF_BEM_20210131.rds')
+KPT_m = merge(KPT_m[[1]], KPT_m[2:4])
+KPT_m = SCTransform(KPT_m, verbose = F)
+KPT_m = RunPCA(KPT_m, verbose = F)
+ElbowPlot(KPT_m)
+
+KPT_m$treat = gsub("-.*","",KPT_m$hash.ID)
+KPT_m$donor = gsub(".*-","",KPT_m$hash.ID)
+
+#18 & 0.5 - looks good
+dim = c(1:18)
+KPT_m = FindNeighbors(KPT_m, dims = dim, k.param = ceiling(0.5*sqrt(ncol(KPT_m))), verbose = F)
+KPT_m = FindClusters(KPT_m, resolution = 0.5, verbose = F)
+KPT_m = RunUMAP(KPT_m, reduction = "pca", dims = dim, verbose = F, umap.method = "umap-learn")
+  
+pdf("2_Full annotation/plots/20210209_SCT_HuOrgKPT_m_UMAP_1.pdf")
+DimPlot(KPT_m)
+DimPlot(KPT_m, reduction = "umap", split.by = "treat")
+DimPlot(KPT_m, reduction = "umap", split.by = "donor")
+dev.off()
+```
+
+#### Subcluster
+```{r}
+KPT_sub = subset(KPT_m, subset = seurat_clusters == 6)
+
+KPT_sub = SCTransform(KPT_sub, verbose = F)
+KPT_sub = RunPCA(KPT_sub, verbose = F)
+ElbowPlot(KPT_sub)
+
+dim = c(1:8)
+KPT_sub = FindNeighbors(KPT_sub, dims = dim, k.param = ceiling(0.5*sqrt(ncol(KPT_sub))), verbose = F)
+KPT_sub = FindClusters(KPT_sub, resolution = 0.3, verbose = F)
+KPT_sub = RunUMAP(KPT_sub, reduction = "pca", dims = dim, verbose = F, umap.method = "umap-learn")
+
+DimPlot(KPT_sub)
+DimPlot(KPT_sub, split.by = 'donor')
+DimPlot(KPT_sub, split.by = 'treat')
+FeaturePlot(KPT_sub, features = c("TFF3", "LYZ", "CHGA"))
+VlnPlot(KPT_sub, features = c("TFF3", "LYZ", "CHGA", "OLFM4"))
+
+KPT_sub2 = subset(KPT_sub, subset = seurat_clusters == 2)
+
+KPT_sub2 = SCTransform(KPT_sub2, verbose = F)
+KPT_sub2 = RunPCA(KPT_sub2, verbose = F, npcs = 10)
+ElbowPlot(KPT_sub2)
+
+dim = c(1:5)
+KPT_sub2 = FindNeighbors(KPT_sub2, dims = dim, k.param = ceiling(0.5*sqrt(ncol(KPT_sub2))), verbose = F)
+KPT_sub2 = FindClusters(KPT_sub2, resolution = 0.3, verbose = F)
+FeatureScatter(KPT_sub2, feature1 = "TFF3", feature2 = "CHGA")
+
+Gob = Cells(subset(KPT_sub2, idents = 1))
+EEC = Cells(subset(KPT_sub2, idents = c(0,2)))
+
+KPT_m$new_clusters = KPT_m$seurat_clusters
+
+my_levels = c(0, 1, 2, 3, 4, 5, 6, 7, 8)
+
+KPT_m@meta.data$new_clusters = factor(KPT_m@meta.data$new_clusters, levels = my_levels)
+
+KPT_m$new_clusters[Gob] = 7
+KPT_m$new_clusters[EEC] = 8
+
+Idents(KPT_m) = factor(KPT_m@meta.data$new_clusters, levels = my_levels)
+
+DimPlot(KPT_m)
+
+```
+
+#### Plot
+```{r}
+KPT_m = NormalizeData(KPT_m, assay = "RNA")
+KPT_m = ScaleData(KPT_m, assay = "RNA")
+DefaultAssay(KPT_m) = "RNA"
+
+pdf("2_Full annotation/plots/20210209_SCT_HuOrgKPT_m_UMAP2.pdf")
+DimPlot(KPT_m, reduction = "umap", group.by = "treat")
+DimPlot(KPT_m, reduction = "umap", split.by = "treat")
+DimPlot(KPT_m, reduction = "umap", group.by = "array")
+DimPlot(KPT_m, reduction = "umap", group.by = "donor")
+DimPlot(KPT_m, reduction = "umap", label = T) + NoLegend()
+FeaturePlot(KPT_m, features = c("percent.mt", "nFeature_RNA", "nCount_RNA"), reduction = "umap")
+VlnPlot(KPT_m, features = c("percent.mt", "nFeature_RNA", "nCount_RNA"), pt.size = 0)
+VlnPlot(KPT_m, features = c("LYZ", "FABP1", "TFF3", "MKI67", "CHGA", "ASCL2"), pt.size = 0)
+# WAE marker?
+VlnPlot(KPT_m, features = c("CD55", "CDX2", "DUOX2", "FABP1"), pt.size = 0)
+# Stem markers
+VlnPlot(KPT_m, features = c("SLC12A2", "OLFM4", "CLU", "LRIG1", "ANXA1"), pt.size = 0)
+VlnPlot(KPT_m, features = c("EPCAM"), pt.size = 0)
+VlnPlot(KPT_m, features = c("APOA1", "BEST4", "GSTA1", "CLCA1", "LCN2"), pt.size = 0)
+dev.off()
+
+```
+
+#### Figure out what the clusters are
+```{r}
+
+# Cluster DE
+KPT_6.response = FindMarkers(KPT_m, ident.1 = 6, logfc.threshold = 0, test.use = "wilcox", min.pct = 0.2, assay = "RNA")
+
+KPT_6.response.filter = KPT_6.response %>% rownames_to_column(var = "gene") %>%
+  dplyr::filter(abs(avg_logFC) > 2*sd(KPT_6.response$avg_logFC)) %>%
+  dplyr::filter(p_val_adj <  0.05)
+
+KPT_45.response = FindMarkers(KPT_m, ident.1 = c(4,5), logfc.threshold = 0, test.use = "wilcox", min.pct = 0.2, assay = "RNA")
+
+KPT_45.response.filter = KPT_45.response %>% rownames_to_column(var = "gene") %>%
+  dplyr::filter(abs(avg_logFC) > 2*sd(KPT_45.response$avg_logFC)) %>%
+  dplyr::filter(p_val_adj <  0.05)
+
+KPT_4v5.response = FindMarkers(KPT_m, ident.1 = 4, ident.2 = 5, logfc.threshold = 0, test.use = "wilcox", min.pct = 0.2, assay = "RNA")
+
+KPT_4v5.response.filter = KPT_4v5.response %>% rownames_to_column(var = "gene") %>%
+  dplyr::filter(abs(avg_logFC) > 2*sd(KPT_4v5.response$avg_logFC)) %>%
+  dplyr::filter(p_val_adj <  0.05)
+
+# GSEA
+myGsc.h = loadGSC(file = "2_Full annotation/marker_genes/mSigDB/h.all.v7.0.symbols.gmt", type = "auto") #h Halmark
+
+fc.GSEA.KPT_6.response = data.frame(KPT_6.response$avg_logFC)
+rownames(fc.GSEA.KPT_6.response) = rownames(KPT_6.response)
+
+GSEA.h = runGSA(geneLevelStats = fc.GSEA.KPT_6.response,
+                 gsc = myGsc.h, gsSizeLim = c(25,500), geneSetStat = "gsea")
+sum.GSEA.h = GSAsummaryTable(GSEA.h, save = T, file = "2_Full annotation/GSEA_KPT_6_msigdb.h.all.v7.xls")
+
+fc.GSEA.KPT_45.response = data.frame(KPT_45.response$avg_logFC)
+rownames(fc.GSEA.KPT_45.response) = rownames(KPT_45.response)
+
+GSEA.h = runGSA(geneLevelStats = fc.GSEA.KPT_45.response,
+                 gsc = myGsc.h, gsSizeLim = c(25,500), geneSetStat = "gsea")
+sum.GSEA.h = GSAsummaryTable(GSEA.h, save = T, file = "2_Full annotation/GSEA_KPT_45_msigdb.h.all.v7.xls")
+
+fc.GSEA.KPT_4v5.response = data.frame(KPT_4v5.response$avg_logFC)
+rownames(fc.GSEA.KPT_4v5.response) = rownames(KPT_4v5.response)
+
+GSEA.h = runGSA(geneLevelStats = fc.GSEA.KPT_4v5.response,
+                 gsc = myGsc.h, gsSizeLim = c(25,500), geneSetStat = "gsea")
+sum.GSEA.h = GSAsummaryTable(GSEA.h, save = T, file = "2_Full annotation/GSEA_KPT_4v5_msigdb.h.all.v7.xls")
+```
+
+#### QC plots
+```{r}
+#find markers
+KPT_m.markers = FindAllMarkers(KPT_m, assay = "RNA", only.pos = T)
+top10 = KPT_m.markers %>% group_by(cluster) %>% top_n(10, avg_logFC)
+
+pdf("2_Full annotation/plots/20210210_SCT_HuOrgKPT_m_QC.pdf")
+VlnPlot(KPT_m, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0)
+VlnPlot(KPT_m, features = "nFeature_RNA", ncol = 3, group.by = "array", pt.size = 0) + NoLegend()
+VlnPlot(KPT_m, features = "nCount_RNA", ncol = 3, group.by = "array", pt.size = 0) + NoLegend()
+VlnPlot(KPT_m, features = "percent.mt", ncol = 3, group.by = "array", pt.size = 0) + NoLegend()
+DoHeatmap(KPT_m, top10$gene, assay = "RNA", raster = F)
+dev.off()
+
+table(KPT_m$treat)
+```
+
+#### Start naming clusters
+```{r}
+
+# 0
+  "progenitor"
+  "#bab2ed"
+# 1
+  "enterocyte"
+  "#2C60AD"
+# 2
+  "stem G1S"
+  "#7CC24F"
+# 3
+  "stem G2M"
+  "#32601F"
+# 4
+  "WAE-like"
+  "#9580ed"
+# 5
+  "DUOX2+ WAE-like"
+  "#ed80d3"
+# 6
+  "quiescent progenitor"
+  '#DCE34E'
+# 7
+  "goblet"
+  "#FF4027"
+# 8 
+  "enteroendocrine"
+  "#F79538"
+  
+
+```
+
+#### annotate clusters & find DE genes
+```{r}
+new.cluster.ids = c("progenitor","enterocyte","stem G1S","stem G2M",
+                    "WAE-like","DUOX2+ WAE-like","quiescent progenitor",
+                    "goblet","enteroendocrine")
+
+names(new.cluster.ids) = levels(KPT_m)
+KPT_m = RenameIdents(KPT_m, new.cluster.ids)
+
+my_levels = c("stem G2M", "stem G1S",
+              "progenitor", "enterocyte", "WAE-like","DUOX2+ WAE-like",
+              "quiescent progenitor", "goblet", "enteroendocrine")
+
+KPT_m@active.ident = factor(KPT_m@active.ident, levels = my_levels)
+KPT_m$annotate = Idents(KPT_m)
+
+#Set colors
+KPT_colors = c("#32601F", "#7CC24F","#bab2ed","#2C60AD","#9580ed","#ed80d3",'#DCE34E',"#FF4027","#F79538")
+
+#find markers
+KPT_m.markers = FindAllMarkers(KPT_m, assay = "RNA", min.pct = 0.2, logfc.threshold = 0.5, only.pos = T)
+top10 = KPT_m.markers %>% group_by(cluster) %>% top_n(10, avg_logFC)
+top5 = KPT_m.markers %>% group_by(cluster) %>% top_n(5, avg_logFC)
+write.csv(KPT_m.markers, "2_Full annotation/HuOrgKPT_m_markers_2102021.csv")
+ds_cells = Cells(subset(KPT_m, downsample = 50))
+
+KPT_m$percent.mt = PercentageFeatureSet(KPT_m, pattern = "^MT-")
+KPT_m$t_d = paste(KPT_m$treat, KPT_m$donor, sep = '_')
+
+T_array_cols = c('#D1D1CF', '#AAAAA9', '#666666', '#E25454', '#EB2626', '#AF4141')
+
+# Plot
+pdf("2_Full annotation/plots/20210211_SCT_HuOrgKPT_m_ANNOTATE.pdf", useDingbats = F)
+DimPlot(KPT_m, reduction = "umap", label = T, cols = KPT_colors) + NoLegend()
+DimPlot(KPT_m, reduction = "umap", split.by = "donor", cols = KPT_colors)
+DimPlot(KPT_m, reduction = "umap", split.by = "treat", cols = KPT_colors)
+DoHeatmap(KPT_m, top10$gene, ds_cells, raster = F, label = F, assay = "RNA", group.colors = KPT_colors) +
+  scale_fill_viridis(option = "B")
+VlnPlot(KPT_m, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0, cols = KPT_colors)
+VlnPlot(KPT_m, features = "nFeature_RNA", ncol = 3, group.by = "array", pt.size = 0) + NoLegend()
+VlnPlot(KPT_m, features = "nCount_RNA", ncol = 3, group.by = "array", pt.size = 0) + NoLegend()
+VlnPlot(KPT_m, features = "percent.mt", ncol = 3, group.by = "array", pt.size = 0) + NoLegend()
+dev.off()
+
+pdf("2_Full annotation/plots/20210211_SCT_HuOrgKPT_m_QC2.pdf", useDingbats = F, width = 3, height = 3)
+
+VlnPlot(KPT_m, features = c("nFeature_RNA"), pt.size = 0, cols = KPT_colors) +
+  NoLegend() + geom_hline(aes(yintercept = 500), linetype = 2) + ylim(0, 7000)
+VlnPlot(KPT_m, features = c("nCount_RNA"), pt.size = 0, cols = KPT_colors) + 
+  NoLegend() + geom_hline(aes(yintercept = 30000), linetype = 2) + ylim(0, 31000)
+VlnPlot(KPT_m, features = c("percent.mt"), pt.size = 0, cols = KPT_colors, y.max = 40) + 
+  NoLegend() + geom_hline(aes(yintercept = 35), linetype = 2)
+
+VlnPlot(KPT_m, features = "nFeature_RNA", group.by = "t_d", pt.size = 0, cols = T_array_cols) +
+  NoLegend() + geom_hline(aes(yintercept = 500), linetype = 2) + ylim(0, 7000)
+VlnPlot(KPT_m, features = "nCount_RNA", group.by = "t_d", pt.size = 0, cols = T_array_cols) + 
+  NoLegend() + geom_hline(aes(yintercept = 30000), linetype = 2) + ylim(0, 31000)
+VlnPlot(KPT_m, features = "percent.mt", group.by = "t_d", pt.size = 0, cols = T_array_cols, y.max = 40) + 
+  NoLegend() + geom_hline(aes(yintercept = 35), linetype = 2)
+
+dev.off
+
+table(KPT_m@meta.data$t_d)
+table(KPT_m@meta.data$annotate)
+
+```
+
+#### Examine dataset for marker sets
+```{r}
+
+#Wang Markers
+nbin = 25
+ctrl = 100
+EEC_markers = read.table("2_Full annotation/marker_genes/Wang2020_genes/EEC_S6.txt", header = F)
+KPT_m = AddModuleScore(KPT_m, EEC_markers, nbin = nbin, ctrl = ctrl, name = "EEC")
+KPT_m$EEC1 = rescale(KPT_m$EEC1)
+Ent_markers = read.table("2_Full annotation/marker_genes/Wang2020_genes/Enterocyte_S5.txt", header = F)
+KPT_m = AddModuleScore(KPT_m, Ent_markers, nbin = nbin, ctrl = ctrl, name = "Ent")
+KPT_m$Ent = rescale(KPT_m$Ent1)
+Progen_markers = read.table("2_Full annotation/marker_genes/Wang2020_genes/Progenitor_S4.txt", header = F)
+KPT_m = AddModuleScore(KPT_m, Progen_markers, nbin = nbin, ctrl = ctrl, name = "Progen")
+KPT_m$Progen = rescale(KPT_m$Progen1)
+Gob_markers = read.table("2_Full annotation/marker_genes/Wang2020_genes/Goblet_S8.txt", header = F)
+KPT_m = AddModuleScore(KPT_m, Gob_markers, nbin = nbin, ctrl = ctrl, name = "Gob")
+KPT_m$Gob1 = rescale(KPT_m$Gob1)
+Pan_markers = read.table("2_Full annotation/marker_genes/Wang2020_genes/PanethSI_S7.txt", header = F)
+KPT_m = AddModuleScore(KPT_m, Pan_markers, nbin = nbin, ctrl = ctrl, name = "Pan")
+KPT_m$Pan1 = rescale(KPT_m$Pan1)
+Stem_markers = read.table("2_Full annotation/marker_genes/Wang2020_genes/Stem_S3.txt", header = F)
+KPT_m = AddModuleScore(KPT_m, Stem_markers, nbin = nbin, ctrl = ctrl, name = "Stem")
+KPT_m$Stem1 = rescale(KPT_m$Stem1)
+
+G1s_markers = as.data.frame(read.table("2_Full annotation/marker_genes/Wang2020_genes/S_pahse_S9.txt", header = F)[,1])
+KPT_m = AddModuleScore(KPT_m, G1s_markers, nbin = nbin, ctrl = ctrl, name = "G1S")
+KPT_m$G1S1 = rescale(KPT_m$G1S1)
+G2m_markers = as.data.frame(read.table("2_Full annotation/marker_genes/Wang2020_genes/G2M_phase_S9.txt", header = F)[,1])
+KPT_m = AddModuleScore(KPT_m, G2m_markers, nbin = nbin, ctrl = ctrl, name = "G2M")
+KPT_m$G2M1 = rescale(KPT_m$G2M1)
+
+# Han adult duodenum markers
+GobC_markers = read.table("2_Full annotation/marker_genes/Han2020_genes/Gob_CLCA1_ADuo_S3.txt", header = F)
+KPT_m = AddModuleScore(KPT_m, GobC_markers, nbin = nbin, ctrl = ctrl, name = "GobC")
+KPT_m$GobC1 = rescale(KPT_m$GobC1)
+GobL_markers = read.table("2_Full annotation/marker_genes/Han2020_genes/Gob_LCN2_ADuo_S3.txt", header = F)
+KPT_m = AddModuleScore(KPT_m, GobL_markers, nbin = nbin, ctrl = ctrl, name = "GobL")
+KPT_m$GobL1 = rescale(KPT_m$GobL1)
+EntProg_markers = read.table("2_Full annotation/marker_genes/Han2020_genes/Ent_Prog_ADuo_S3.txt", header = F)
+KPT_m = AddModuleScore(KPT_m, EntProg_markers, nbin = nbin, ctrl = ctrl, name = "EntP")
+KPT_m$EntP1 = rescale(KPT_m$EntP1)
+EntA_markers = read.table("2_Full annotation/marker_genes/Han2020_genes/Ent_APOA1_ADuo_S3.txt", header = F)
+KPT_m = AddModuleScore(KPT_m, EntA_markers, nbin = nbin, ctrl = ctrl, name = "EntA")
+KPT_m$EntA1 = rescale(KPT_m$EntA1)
+EntB_markers = read.table("2_Full annotation/marker_genes/Han2020_genes/Ent_BEST4_ADuo_S3.txt", header = F)
+KPT_m = AddModuleScore(KPT_m, EntB_markers, nbin = nbin, ctrl = ctrl, name = "EntB")
+KPT_m$EntB1 = rescale(KPT_m$EntB1)
+EntG_markers = read.table("2_Full annotation/marker_genes/Han2020_genes/Ent_GSTA1_ADuo_S3.txt", header = F)
+KPT_m = AddModuleScore(KPT_m, EntG_markers, nbin = nbin, ctrl = ctrl, name = "EntG")
+KPT_m$EntG1 = rescale(KPT_m$EntG1)
+
+# NES genes
+NES_markers = as.data.frame(read.table("2_Full annotation/marker_genes/validNESS/NES_genes.txt", header = F)[,1])
+KPT_m = AddModuleScore(KPT_m, NES_markers, nbin = nbin, ctrl = ctrl, name = "NES")
+KPT_m$NES1 = rescale(KPT_m$NES1)
+
+
+pdf('2_Full annotation/plots/20210209_SCT_HuOrgKPT_m_MARKERS.pdf', useDingbats = F, width = 3, height = 3)
+
+FeaturePlot(KPT_m, features = c("Stem1"), cols = c("lightgrey", viridis(1)))
+FeaturePlot(KPT_m, features = c("Progen1"), cols = c("lightgrey", viridis(1)))
+FeaturePlot(KPT_m, features = c("Ent1"), cols = c("lightgrey", viridis(1)))
+FeaturePlot(KPT_m, features = c("Pan1"), cols = c("lightgrey", viridis(1)))
+FeaturePlot(KPT_m, features = c("Gob1"), cols = c("lightgrey", viridis(1)))
+FeaturePlot(KPT_m, features = c("EEC1"), cols = c("lightgrey", viridis(1)))
+FeaturePlot(KPT_m, features = c("G2M1"), cols = c("lightgrey", viridis(1)))
+FeaturePlot(KPT_m, features = c("G1S1"), cols = c("lightgrey", viridis(1)))
+
+FeaturePlot(KPT_m, features = c("GobL1"), cols = c("lightgrey", viridis(1)))
+FeaturePlot(KPT_m, features = c("EntP1"), cols = c("lightgrey", viridis(1)))
+FeaturePlot(KPT_m, features = c("EntB1"), cols = c("lightgrey", viridis(1)))
+
+VlnPlot(KPT_m, features = c("Stem1"), pt.size = 0, cols = KPT_colors) + NoLegend()
+VlnPlot(KPT_m, features = c("Progen1"), pt.size = 0, cols = KPT_colors) + NoLegend()
+VlnPlot(KPT_m, features = c("G2M1"), pt.size = 0, cols = KPT_colors) + NoLegend()
+VlnPlot(KPT_m, features = c("G1S1"), pt.size = 0, cols = KPT_colors) + NoLegend()
+
+VlnPlot(KPT_m, features = c("Gob1"), pt.size = 0, cols = KPT_colors) + NoLegend()
+VlnPlot(KPT_m, features = c("EEC1"), pt.size = 0, cols = KPT_colors) + NoLegend()
+VlnPlot(KPT_m, features = c("Ent1"), pt.size = 0, cols = KPT_colors) + NoLegend()
+
+VlnPlot(KPT_m, features = c("GobC1","GobL1","EntP1","EntA1", "EntB1", "EntG1"), pt.size = 0, cols = KPT_colors) + NoLegend()
+
+dev.off()
+
+# Other gene markers
+pdf('2_Full annotation/plots/20210225_SCT_HuOrgKPT_m_MARKER_genes.pdf', useDingbats = F, width = 3, height = 3)
+#WAE markers
+VlnPlot(KPT_m, features = c("CD55"), cols = KPT_colors, pt.size = 0) + NoLegend() # WAE marker
+VlnPlot(KPT_m, features = c("DUOX2"), cols = KPT_colors, pt.size = 0) + NoLegend() # stress-response marker
+VlnPlot(KPT_m, features = c("CLDN4"), cols = KPT_colors, pt.size = 0) + NoLegend() # WAE marker
+VlnPlot(KPT_m, features = c("TFF1"), cols = KPT_colors, pt.size = 0) + NoLegend() # WAE marker
+VlnPlot(KPT_m, features = c("PDX1"), cols = KPT_colors, pt.size = 0) + NoLegend() # WAE marker
+#Stem Markers
+VlnPlot(KPT_m, features = c("SLC12A2"), cols = KPT_colors, pt.size = 0) + NoLegend() # stem marker??
+VlnPlot(KPT_m, features = c("OLFM4"), cols = KPT_colors, pt.size = 0) + NoLegend() # stem marker
+VlnPlot(KPT_m, features = c("LRIG1"), cols = KPT_colors, pt.size = 0) + NoLegend() # Quiesc stem marker
+VlnPlot(KPT_m, features = c("PHB"), cols = KPT_colors, pt.size = 0) + NoLegend() # stem / progenitor marker
+VlnPlot(KPT_m, features = c("ASCL2"), cols = KPT_colors, pt.size = 0) + NoLegend() # stem / progenitor marker
+VlnPlot(KPT_m, features = c("CDK6"), cols = KPT_colors, pt.size = 0) + NoLegend() # stem / progenitor marker
+VlnPlot(KPT_m, features = c("MKI67"), cols = KPT_colors, pt.size = 0) + NoLegend()  # cell cycle
+#Progenitor markers
+VlnPlot(KPT_m, features = c("HES1"), cols = KPT_colors, pt.size = 0) + NoLegend() # HES1 down PC up / Notch related
+VlnPlot(KPT_m, features = c("SOX9"), cols = KPT_colors, pt.size = 0) + NoLegend() # progenitor marker
+VlnPlot(KPT_m, features = c("LRP6"), cols = KPT_colors, pt.size = 0) + NoLegend() # wnt co-receptor
+VlnPlot(KPT_m, features = c("CDX2"), cols = KPT_colors, pt.size = 0) + NoLegend() # enterocyte-related TF
+dev.off()
+
+
+```
+
+#### Save + Load Object
+```{r}
+saveRDS(KPT_m, '2_Full annotation/SCT_HuOrgKPT_m_20210211.rds', compress= T)
+KPT_m = readRDS('2_Full annotation/SCT_HuOrgKPT_m_20210211.rds')
+KPT_colors = c("#32601F","#7CC24F","#bab2ed","#2C60AD","#9580ed","#ed80d3",'#DCE34E',"#FF4027","#F79538")
+treat_cols = rev(c("#EB2626","#AAAAA9"))
+
+```
+
+#### Extract out identities for plotting
+```{r}
+# By donor
+d.Number.table = data.frame(rbind(table(factor(KPT_m$annotate)[which(KPT_m$donor == '1')]),
+                   table(factor(KPT_m$annotate)[which(KPT_m$donor == '3')]),
+                   table(factor(KPT_m$annotate)[which(KPT_m$donor  == '4')])))
+
+rownames(d.Number.table) = c("1","3","4")
+colnames(d.Number.table) = c("stem_G1S", "stem_G2M",
+              "progenitor", "enterocyte", "WAE_like","DUOX2+_WAE_like",
+              "quiescent_progenitor", "goblet", "enteroendocrine")
+
+d.Number.table = rownames_to_column(d.Number.table, "donor")
+
+d.Plot.table = gather(d.Number.table, "identity", "cell_number", 2:10)
+d.Plot.table = d.Plot.table %>% group_by(donor) %>% mutate(cell_frac = cell_number / sum(cell_number))
+
+d.Plot.table$identity = factor(d.Plot.table$identity, levels = rev(c("stem_G2M","stem_G1S", 
+              "progenitor", "enterocyte", "WAE_like","DUOX2+_WAE_like",
+              "quiescent_progenitor", "goblet", "enteroendocrine")))
+
+pdf('2_Full annotation/plots/20210216_HuOrgKPT_m_donor_comp.pdf', useDingbats = F, width = 3, height = 3)
+ggplot(d.Plot.table,
+       aes(fill=identity, y=cell_number, x=donor, order = identity)) + 
+    geom_bar(position="fill", stat = "identity") + 
+    scale_fill_manual(values=rev(KPT_colors)) +
+    labs(title = "Composition") + theme_classic() + theme(legend.position = "none")
+dev.off()
+
+# By donor + treat
+Number.table = data.frame(rbind(table(factor(KPT_m$annotate)[which(KPT_m$t_d == 'Ctrl_1')]),
+                   table(factor(KPT_m$annotate)[which(KPT_m$t_d == 'Ctrl_3')]),
+                   table(factor(KPT_m$annotate)[which(KPT_m$t_d == 'Ctrl_4')]),
+                   table(factor(KPT_m$annotate)[which(KPT_m$t_d  == 'KPT_1')]),
+                   table(factor(KPT_m$annotate)[which(KPT_m$t_d  == 'KPT_3')]),
+                   table(factor(KPT_m$annotate)[which(KPT_m$t_d  == 'KPT_4')])))
+
+rownames(Number.table) = c("C_1","C_3","C_4","K_1","K_3","K_4")
+colnames(Number.table) = c("stem_G1S", "stem_G2M",
+              "progenitor", "enterocyte", "WAE_like","DUOX2+_WAE_like",
+              "quiescent_progenitor", "goblet", "enteroendocrine")
+
+Number.table = rownames_to_column(Number.table, "sample")
+
+Plot.table = gather(Number.table, "identity", "cell_number", 2:10)
+Plot.table = Plot.table %>% group_by(sample) %>% mutate(cell_frac = cell_number / sum(cell_number))
+
+Plot.table$identity = factor(Plot.table$identity, levels = rev(c("stem_G2M","stem_G1S",
+              "progenitor", "enterocyte", "WAE_like","DUOX2+_WAE_like",
+              "quiescent_progenitor", "goblet", "enteroendocrine")))
+
+Plot.table$sample = factor(Plot.table$sample, levels = c("C_1","K_1","C_3","K_3","C_4","K_4"))
+
+Plot.table = separate(Plot.table, sample, c("treat", "donor"), sep = "_", remove = F)
+
+Plot.table.C = Plot.table %>% dplyr::filter(treat != "K")
+Plot.table.K = Plot.table %>% dplyr::filter(treat != "C")
+
+# For fisher's exact test
+fisher.table = c()
+
+for(d in unique(pull(Plot.table, donor))) {
+  Plot.table.C.d = Plot.table.C %>% dplyr::filter(donor == d)
+  Plot.table.K.d = Plot.table.K %>% dplyr::filter(donor == d)
+  
+  clust.C = Plot.table.C.d %>% dplyr::filter(cell_number > 0)
+  clust.K = Plot.table.K.d %>% dplyr::filter(cell_number > 0)
+  
+  idents = as.character(intersect(pull(clust.C, identity),pull(clust.K, identity)))
+  
+  for(i in idents) {
+  
+    IC = sum(as.numeric(dplyr::filter(Plot.table.C.d, identity == i)$cell_number))
+    AC = sum(as.numeric(dplyr::filter(Plot.table.C.d, identity != i)$cell_number))
+    
+    IK = sum(as.numeric(dplyr::filter(Plot.table.K.d, identity == i)$cell_number))
+    AK = sum(as.numeric(dplyr::filter(Plot.table.K.d, identity != i)$cell_number))
+    
+    test_mat = matrix(c(IK, IC, AK, AC), nrow = 2,
+       dimnames = list(Treat = c("KPT", "CTRL"),
+                       Ident = c(i, "all others")))
+    
+    fish = fisher.test(test_mat, alternative = "two.sided")
+    
+    fisher.table = rbind(fisher.table, c(d,i,as.numeric(fish$estimate), fish$conf.int, fish$p.value))
+  }
+}
+
+colnames(fisher.table) = c("donor", "identity", "odds_ratio", "95_lor", "95_uor", "p_value")
+fisher.table = as.data.frame(fisher.table, stringsAsFactors =F)
+fisher.table$odds_ratio = as.numeric(fisher.table$odds_ratio)
+fisher.table$`95_lor` = as.numeric(fisher.table$`95_lor`)
+fisher.table$`95_uor` = as.numeric(fisher.table$`95_uor`)
+fisher.table$p_value = as.numeric(fisher.table$p_value)
+fisher.table$identity = factor(fisher.table$identity, levels = c("stem_G2M","stem_G1S",
+              "progenitor", "enterocyte", "WAE_like","DUOX2+_WAE_like",
+              "quiescent_progenitor", "goblet", "enteroendocrine"))
+
+fisher.table$adj_p_value = p.adjust(fisher.table$p_value, method = "fdr")
+
+write.csv(fisher.table, '2_Full annotation/huOrg_KPT_m_fisher_test_composition_09102021.csv')
+
+signif1.fisher.table = fisher.table %>% dplyr::filter(adj_p_value < 0.05) %>% dplyr::filter(adj_p_value > 0.01)
+signif2.fisher.table = fisher.table %>% dplyr::filter(adj_p_value < 0.01) %>% dplyr::filter(adj_p_value > 0.001)
+signif3.fisher.table = fisher.table %>% dplyr::filter(adj_p_value < 0.001) %>% dplyr::filter(adj_p_value > 0.0001)
+signif4.fisher.table = fisher.table %>% dplyr::filter(adj_p_value < 0.0001)
+
+pdf('2_Full annotation/plots/20210216_HuOrgKPT_m_donor_treat_comp.pdf', useDingbats = F, width = 3, height = 3)
+ggplot(Plot.table,
+       aes(fill=identity, y=cell_number, x=sample, order = identity)) + 
+    geom_bar(position="fill", stat = "identity") + 
+    scale_fill_manual(values=rev(KPT_colors)) +
+    labs(title = "Composition") + theme_classic() + theme(legend.position = "none")
+
+ggplot(fisher.table, aes(x = identity, y = odds_ratio, ymin = `95_lor`, ymax = `95_uor`, group = identity)) + 
+  geom_pointrange(size = 0.25) + theme_classic() + scale_y_log10() + facet_grid(donor~.) + geom_hline(aes(yintercept = 1), linetype = 2)
+
+dev.off()
+
+# By treat
+t.Number.table = data.frame(rbind(table(factor(KPT_m$annotate)[which(KPT_m$treat == 'Ctrl')]),
+                   table(factor(KPT_m$annotate)[which(KPT_m$treat  == 'KPT')])))
+
+rownames(t.Number.table) = c("C","K")
+colnames(t.Number.table) = c("stem_G1S", "stem_G2M",
+              "progenitor", "enterocyte", "WAE_like","DUOX2+_WAE_like",
+              "quiescent_progenitor", "goblet", "enteroendocrine")
+
+t.Number.table = rownames_to_column(t.Number.table, "treat")
+
+t.Plot.table = gather(t.Number.table, "identity", "cell_number", 2:10)
+t.Plot.table = t.Plot.table %>% group_by(treat) %>% mutate(cell_frac = cell_number / sum(cell_number))
+
+t.Plot.table$identity = factor(t.Plot.table$identity, levels = rev(c("stem_G2M","stem_G1S",
+              "progenitor", "enterocyte", "WAE_like","DUOX2+_WAE_like",
+              "quiescent_progenitor", "goblet", "enteroendocrine")))
+
+t.Plot.table.C = t.Plot.table %>% dplyr::filter(treat != "K")
+t.Plot.table.K = t.Plot.table %>% dplyr::filter(treat != "C")
+
+# For fisher's exact test
+fisher.table = c()
+  
+ident.C = t.Plot.table.C %>% dplyr::filter(cell_frac > 0.005)
+ident.K = t.Plot.table.K %>% dplyr::filter(cell_frac > 0.005)
+
+idents = as.character(semi_join(ident.C[,2], ident.K[,2])$identity)
+
+for (i in idents) {
+  IC = as.numeric(dplyr::filter(t.Plot.table.C, identity == i)$cell_number)
+  AC = sum(as.numeric(dplyr::filter(t.Plot.table.C, identity != i)$cell_number))
+  
+  AOC = t(as.numeric(dplyr::filter(t.Plot.table.C, identity != i)$cell_number))
+  
+  IK = as.numeric(dplyr::filter(t.Plot.table.K, identity == i)$cell_number)
+  AK = sum(as.numeric(dplyr::filter(t.Plot.table.K, identity != i)$cell_number))
+  
+  AOK = t(as.numeric(dplyr::filter(t.Plot.table.K, identity != i)$cell_number))
+  
+  test_mat = matrix(c(IK, IC, AK, AC), nrow = 2,
+     dimnames = list(Treat = c("KPT", "CTRL"),
+                     Ident = c(i, "all others")))
+  
+  test_mat2 = matrix(c(IK, IC, AOK, AOC), nrow = 2,
+     dimnames = list(Treat = c("KPT", "CTRL"),
+                     Ident = c(i, t(as.character(dplyr::filter(t.Plot.table.C, identity != i)$identity)))))
+  
+  fish = fisher.test(test_mat, alternative = "two.sided")
+  
+  fisher.table = rbind(fisher.table, c(i,as.numeric(fish$estimate), fish$conf.int, fish$p.value))
+}
+
+
+colnames(fisher.table) = c("identity", "odds_ratio", "95_lor", "95_uor", "p_value")
+fisher.table = as.data.frame(fisher.table, stringsAsFactors =F)
+fisher.table$odds_ratio = as.numeric(fisher.table$odds_ratio)
+fisher.table$`95_lor` = as.numeric(fisher.table$`95_lor`)
+fisher.table$`95_uor` = as.numeric(fisher.table$`95_uor`)
+fisher.table$p_value = as.numeric(fisher.table$p_value)
+fisher.table$identity = factor(fisher.table$identity, levels = c("stem_G2M","stem_G1S",
+              "progenitor", "enterocyte", "WAE_like","DUOX2+_WAE_like",
+              "quiescent_progenitor", "goblet", "enteroendocrine"))
+
+fisher.table$adj_p_value = p.adjust(fisher.table$p_value, method = "fdr")
+
+signif1.fisher.table = fisher.table %>% dplyr::filter(adj_p_value < 0.05) %>% dplyr::filter(adj_p_value > 0.01)
+signif2.fisher.table = fisher.table %>% dplyr::filter(adj_p_value < 0.01) %>% dplyr::filter(adj_p_value > 0.001)
+signif3.fisher.table = fisher.table %>% dplyr::filter(adj_p_value < 0.001) %>% dplyr::filter(adj_p_value > 0.0001)
+signif4.fisher.table = fisher.table %>% dplyr::filter(adj_p_value < 0.0001)
+
+pdf('2_Full annotation/plots/20210216_HuOrg_KPT_m_treat_OR.pdf', useDingbats = F, width = 6, height = 2)
+
+ggplot(fisher.table, aes(x = identity, y = odds_ratio, ymin = `95_lor`, ymax = `95_uor`, group = identity)) + 
+  geom_pointrange(size = 0.25) + theme_classic() + scale_y_log10() + geom_hline(aes(yintercept = 1), linetype = 2)
+
+dev.off()
+
+```
+
+#### Plots for stem-cell modulation
+```{r}
+treat_cols = rev(c("#EB2626","#AAAAA9"))
+treat_cols2 = c("#EB2626","#AAAAA9", "#AAAAA9")
+
+# stem vs non
+KPT_m$stem_v_all = "stem"
+KPT_m$stem_v_all[which(KPT_m$annotate == c("stem G2M"))] = "stem G2M"
+KPT_m$stem_v_all[which(KPT_m$annotate == c("stem G1S"))] = "stem G1S"
+KPT_m$stem_v_all[which(KPT_m$annotate != c("stem G2M", "stem G1S"))] = "non-stem"
+stem_v_all.col = c("#AAAAA9", "#7CC24F", "#32601F")
+
+# Look @ NES / Xpo1 stuff
+pdf('2_Full annotation/plots/20210217_SCT_HuOrgKPT_m_Xpo1.pdf', useDingbats = F, width = 3, height = 3)
+
+VlnPlot(subset(KPT_m, subset = treat != "KPT"), "XPO1", assay = "RNA", pt.size = 0, cols = KPT_colors) + NoLegend()
+VlnPlot(subset(KPT_m, subset = treat != "KPT"), "NES1", pt.size = 0, cols = KPT_colors)+ NoLegend() +
+  geom_hline(aes(yintercept = median(subset(KPT_m, subset = treat != "KPT")@meta.data$NES1)), linetype = 2)
+VlnPlot(subset(KPT_m, subset = treat != "KPT"), "XPO1", group.by = "stem_v_all", pt.size = 0, assay = "RNA", cols = stem_v_all.col) + NoLegend()
+VlnPlot(subset(KPT_m, subset = treat != "KPT"), "NES1", group.by = "stem_v_all", pt.size = 0, cols = stem_v_all.col)+ NoLegend() + 
+  geom_hline(aes(yintercept = median(subset(KPT_m, subset = treat != "KPT")@meta.data$NES1)), linetype = 2)
+VlnPlot(KPT_m, "XPO1", assay = "RNA", pt.size = 0, split.by = "treat", cols = treat_cols) + NoLegend()
+VlnPlot(KPT_m, "XPO1", assay = "RNA", pt.size = 0, group.by = "stem_v_all", split.by = "treat", cols = treat_cols) + NoLegend()
+dev.off()
+
+NES_table = FetchData(subset(KPT_m, subset = treat != "KPT"), vars = c("rna_XPO1", "stem_v_all", "NES1"))
+NES_table$stem_v_all = as.factor(NES_table$stem_v_all)
+DunnettTest(NES1 ~ stem_v_all, data = NES_table, control = "non-stem")
+
+xpo_stemG2M_out = FindMarkers(subset(KPT_m, subset = treat != "KPT"), feature = "XPO1", ident.1 = "stem G2M", ident.2 = "non-stem", group.by = "stem_v_all", test.use = "wilcox", assay = "RNA", verbose = F, logfc.threshold = 0)
+xpo_stemG1S_out = FindMarkers(subset(KPT_m, subset = treat != "KPT"), feature = "XPO1", ident.1 = "stem G1S", ident.2 = "non-stem", group.by = "stem_v_all", test.use = "wilcox", assay = "RNA", verbose = F, logfc.threshold = 0)
+
+# sec prog v non
+KPT_m$sp_v_all = "all others"
+KPT_m$sp_v_all[which(KPT_m$annotate == c("WAE-like"))] = "WAE-like"
+KPT_m$sp_v_all[which(KPT_m$annotate == c("DUOX2+ WAE-like"))] = "DUOX2+ WAE-like"
+KPT_m$sp_v_all[which(KPT_m$annotate == c("quiescent progenitor"))] = "quiescent progenitor"
+
+sp_v_all.col = c("#AAAAA9","#9580ed", "#ed80d3", '#DCE34E')
+KPT_m@meta.data$sp_v_all = factor(x = KPT_m@meta.data$sp_v_all, levels = c("all others", "WAE-like", "DUOX2+ WAE-like", "quiescent progenitor"))
+
+# Look @ LYZ stuff
+pdf('2_Full annotation/plots/20210217_SCT_HuOrgKPT_m_LYZ.pdf', useDingbats = F, width = 3, height = 3)
+
+VlnPlot(KPT_m, "LYZ", assay = "RNA", pt.size = 0, group.by = 'donor', split.by = 'treat', cols = treat_cols) + NoLegend()
+VlnPlot(KPT_m, "MKI67", assay = "RNA", pt.size = 0, group.by = 'donor', split.by = 'treat', cols = treat_cols) + NoLegend()
+VlnPlot(KPT_m, "LYZ", assay = "RNA", pt.size = 0, cols = KPT_colors) + NoLegend()
+VlnPlot(KPT_m, "Pan1", pt.size = 0, cols = KPT_colors)+ NoLegend() +
+  geom_hline(aes(yintercept = median(KPT_m@meta.data$Pan1)), linetype = 2)
+
+VlnPlot(KPT_m, "LYZ", group.by = "sp_v_all", pt.size = 0, assay = "RNA", cols = sp_v_all.col) + NoLegend()
+VlnPlot(KPT_m, "Pan1", group.by = "sp_v_all", pt.size = 0, cols = sp_v_all.col)+ NoLegend() + 
+  geom_hline(aes(yintercept = median(KPT_m@meta.data$Pan1)), linetype = 2)
+dev.off()
+
+LYZ_td1_out = FindMarkers(KPT_m, feature = "LYZ", ident.1 = "Ctrl_1", ident.2 = "KPT_1", group.by = "t_d", test.use = "wilcox", assay = "RNA", verbose = F, logfc.threshold = 0)
+LYZ_td3_out = FindMarkers(KPT_m, feature = "LYZ", ident.1 = "Ctrl_3", ident.2 = "KPT_3", group.by = "t_d", test.use = "wilcox", assay = "RNA", verbose = F, logfc.threshold = 0)
+LYZ_td4_out = FindMarkers(KPT_m, feature = "LYZ", ident.1 = "Ctrl_4", ident.2 = "KPT_4", group.by = "t_d", test.use = "wilcox", assay = "RNA", verbose = F, logfc.threshold = 0)
+
+LYZ_sp_out = FindMarkers(KPT_m, feature = "LYZ", ident.1 = "quiescent progenitor", ident.2 = "non-quiescent progenitor", group.by = "sp_v_all", test.use = "wilcox", assay = "RNA", verbose = F, logfc.threshold = 0)
+
+LYZ_DUOX2_out = FindMarkers(KPT_m, feature = "LYZ", ident.1 = "DUOX2+ WAE-like", ident.2 = "WAE-like", group.by = "sp_v_all", test.use = "wilcox", assay = "RNA", verbose = F, logfc.threshold = 0)
+
+```
+
+#### Run Progeny
+```{r}
+KPT_m = progeny(KPT_m, scale=F, organism="Human", top=300, perm=1, assy_name = "RNA", return_assay = T)
+KPT_m = ScaleData(KPT_m, assay = "progeny")
+
+FeaturePlot(KPT_m, features = c("progeny_p53"))
+
+VlnPlot(KPT_m, features = c("progeny_Hypoxia", "progeny_TNFa", "progeny_TGFb"), split.by = "treat", pt.size = 0)
+
+# build out datasets
+CellsClusters = data.frame(Cell = names(Idents(KPT_m)), CellType = as.character(Idents(KPT_m)), stringsAsFactors = F)
+Treat = data.frame(Cell = rownames(KPT_m@meta.data), Treat = as.character(KPT_m@meta.data$treat), stringsAsFactors = F)
+
+progeny_scores_df = as.data.frame(t(GetAssayData(KPT_m, slot = "scale.data", assay = "progeny"))) %>%
+    rownames_to_column("Cell") %>% gather(Pathway, Activity, -Cell)
+progeny_scores_df = inner_join(progeny_scores_df, CellsClusters) %>% inner_join(Treat)
+
+#heatmap of all cells
+summarized_progeny_scores = progeny_scores_df %>%
+    group_by(Pathway, CellType) %>%
+    summarise(avg = mean(Activity), std = sd(Activity))
+
+summarized_progeny_scores_df = summarized_progeny_scores %>%
+    dplyr::select(-std) %>%
+    spread(Pathway, avg) %>%
+    data.frame(row.names = 1, check.names = F, stringsAsFactors = F)
+
+summarized_progeny_scores_df = summarized_progeny_scores_df[rev(c("stem G2M","stem G1S",
+              "progenitor", "enterocyte", "WAE-like","DUOX2+ WAE-like",
+              "quiescent progenitor", "goblet", "enteroendocrine")),]
+
+pdf('2_Full annotation/plots/20210217_HuOrgKPT_m_Progeny_heat.pdf', useDingbats = F, width = 8, height = 4)
+superheat(summarized_progeny_scores_df,
+          scale = T,
+          col.dendrogram = T,
+          left.label.col = rev(KPT_colors),
+          left.label.text.size = 4,
+          left.label.size = 0.3,
+          bottom.label.col = "white",
+          bottom.label.text.size = 3,
+          bottom.label.size = 0.6,
+          pretty.order.cols = T,
+          bottom.label.text.angle = 90,
+          grid.hline.col = "white",
+          grid.vline.col = "white",
+          heat.pal = viridis(3, option = "B"),
+          legend.text.size = 10)
+dev.off()
+
+```
