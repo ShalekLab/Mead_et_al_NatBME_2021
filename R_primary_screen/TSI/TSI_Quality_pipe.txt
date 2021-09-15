@@ -1,0 +1,211 @@
+TSI pipeline
+Times pipeline was run:
+1
+Assays performed:  CTG LYZ.NS LYZ.S
+Controls used:  POS
+Dates of Experiments:  1110 201
+
+Pipeline run: 1 	on: 2018-03-09 15:34:06
+Imported:
+	 TSI_1110_compiled.xlsx
+	 TSI_201_compiled.xlsx
+Converted to raw data to table with columns:
+ Treatment Index row col Dose Cell.Type Stim Plate CTG LYZ.NS LYZ.S
+	Saved Raw.tbl as Raw_data.csv in Qual_Data
+Transformed raw data to Log10 space
+	Saved Log.Raw.tbl as Log_Norm_data.csv in Qual_Data
+Loess normalized:	 Log.Raw.tbl
+	Saved LOESS.Log.tbl as LOESS_Norm_data.csv in Qual_Data
+Found fold change of log values relative to plate
+	Saved FC.LOESS.Log.tbl as Plate_Norm_data.csv in Qual_Data
+Imported Target list
+
+Performing Data Analysis for: FC.Full.tbl
+Control outliers removed 	 ( 3 stdev ):
+	 3 removed from FC.LOESS.Log.tbl
+Summarized FC.LOESS.Log.tbl grouped by Treatment Dose
+Found Z scores with plate as control
+Found Replicate UMVUE SSMD scores with plate as control
+Saved Analyzed.FC.tbl as TSI_Analyzed.FC.tbl.csv with columns:
+ Treatment Target Pathway Dose Dose.FC.CTG Dose.FC.LYZ.NS Dose.FC.LYZ.S Z.CTG Z.LYZ.NS Z.LYZ.S Rep.n SSMD.CTG_Rep SSMD.LYZ.NS_Rep SSMD.LYZ.S_Rep
+
+Performing Replicate Hit Analysis for: FC.Full.tbl
+Critical Values for Replicate screen:
+=====  =========  =========
+count   SSMDcrit      alpha
+=====  =========  =========
+    3  0.9971874  0.0844998
+=====  =========  =========
+
+Saved Filt.tbl as TSI_Rep_hits.csv with columns:
+ Treatment Target Pathway Dose Dose.FC.CTG Dose.FC.LYZ.NS Dose.FC.LYZ.S Z.CTG Z.LYZ.NS Z.LYZ.S Rep.n SSMD.CTG_Rep SSMD.LYZ.NS_Rep SSMD.LYZ.S_Rep
+Critical Values for Z scored FC (10%): 1.281552
+Saved Filt.tbl as TSI_Z_Rep_hits.csv with columns:
+ Treatment Target Pathway Dose Dose.FC.CTG Dose.FC.LYZ.NS Dose.FC.LYZ.S Z.CTG Z.LYZ.NS Z.LYZ.S Rep.n SSMD.CTG_Rep SSMD.LYZ.NS_Rep SSMD.LYZ.S_Rep
+
+Performing Primary Analysis for: m29 m30 m31
+
+Data Analysis for:  m29
+Summarized m.FC.LOESS.Log.tbl grouped by Treatment Dose
+Found Z scores with plate as control
+Found Primary UMVUE SSMD scores with plate as control
+Saved Full.tbl as TSI_Full_m29.tbl.csv with columns:
+ Treatment Target Pathway Dose Dose.FC.CTG Dose.FC.LYZ.NS Dose.FC.LYZ.S Z.CTG Z.LYZ.NS Z.LYZ.S Index row col Cell.Type Stim Plate SSMD.CTG_Prim SSMD.LYZ.NS_Prim SSMD.LYZ.S_Prim
+
+Data Analysis for:  m30
+Summarized m.FC.LOESS.Log.tbl grouped by Treatment Dose
+Found Z scores with plate as control
+Found Primary UMVUE SSMD scores with plate as control
+Saved Full.tbl as TSI_Full_m30.tbl.csv with columns:
+ Treatment Target Pathway Dose Dose.FC.CTG Dose.FC.LYZ.NS Dose.FC.LYZ.S Z.CTG Z.LYZ.NS Z.LYZ.S Index row col Cell.Type Stim Plate SSMD.CTG_Prim SSMD.LYZ.NS_Prim SSMD.LYZ.S_Prim
+
+Data Analysis for:  m31
+Summarized m.FC.LOESS.Log.tbl grouped by Treatment Dose
+Found Z scores with plate as control
+Found Primary UMVUE SSMD scores with plate as control
+Saved Full.tbl as TSI_Full_m31.tbl.csv with columns:
+ Treatment Target Pathway Dose Dose.FC.CTG Dose.FC.LYZ.NS Dose.FC.LYZ.S Z.CTG Z.LYZ.NS Z.LYZ.S Index row col Cell.Type Stim Plate SSMD.CTG_Prim SSMD.LYZ.NS_Prim SSMD.LYZ.S_Prim
+
+Plotted Correlation Plots for:	 Treatment between mice m29 m30
+Pearson Correlation between mice:	
+===========  ==============  =============
+Dose.FC.CTG  Dose.FC.LYZ.NS  Dose.FC.LYZ.S
+===========  ==============  =============
+      0.675           0.569           0.63
+===========  ==============  =============
+
+Pearson Correlation per plate:
+=====  ===========  ==============  =============
+Plate  Dose.FC.CTG  Dose.FC.LYZ.NS  Dose.FC.LYZ.S
+=====  ===========  ==============  =============
+P1           0.737           0.612          0.692
+P2           0.615           0.495          0.546
+P3           0.678           0.656          0.695
+P4           0.636           0.594          0.649
+P5           0.648           0.529          0.595
+=====  ===========  ==============  =============
+
+Spearman Correlation between mice:	
+===========  ==============  =============
+Dose.FC.CTG  Dose.FC.LYZ.NS  Dose.FC.LYZ.S
+===========  ==============  =============
+      0.513           0.547          0.549
+===========  ==============  =============
+
+Spearman Correlation per plate:
+=====  ===========  ==============  =============
+Plate  Dose.FC.CTG  Dose.FC.LYZ.NS  Dose.FC.LYZ.S
+=====  ===========  ==============  =============
+P1           0.667           0.625          0.676
+P2           0.506           0.493          0.507
+P3           0.532           0.612          0.577
+P4           0.371           0.504          0.417
+P5           0.392           0.474          0.524
+=====  ===========  ==============  =============
+
+Saved S.Corr as TSI_m29_m30_Spearman.Corr.plate.csv with columns:
+ Plate Dose.FC.CTG Dose.FC.LYZ.NS Dose.FC.LYZ.S
+Saved S.Corr.all as TSI_m29_m30_Spearman.Corr.all.csv with columns:
+ Dose.FC.CTG Dose.FC.LYZ.NS Dose.FC.LYZ.S
+Saved Corr as TSI_m29_m30_Pearson.Corr.plate.csv with columns:
+ Plate Dose.FC.CTG Dose.FC.LYZ.NS Dose.FC.LYZ.S
+Saved Corr.all as TSI_m29_m30_Pearson.Corr.all.csv with columns:
+ Dose.FC.CTG Dose.FC.LYZ.NS Dose.FC.LYZ.S
+
+Plotted Correlation Plots for:	 Treatment between mice m29 m31
+Pearson Correlation between mice:	
+===========  ==============  =============
+Dose.FC.CTG  Dose.FC.LYZ.NS  Dose.FC.LYZ.S
+===========  ==============  =============
+      0.583           0.525          0.568
+===========  ==============  =============
+
+Pearson Correlation per plate:
+=====  ===========  ==============  =============
+Plate  Dose.FC.CTG  Dose.FC.LYZ.NS  Dose.FC.LYZ.S
+=====  ===========  ==============  =============
+P1           0.634           0.554          0.621
+P2           0.671           0.625          0.660
+P3           0.668           0.685          0.680
+P4           0.457           0.314          0.385
+P5           0.535           0.479          0.525
+=====  ===========  ==============  =============
+
+Spearman Correlation between mice:	
+===========  ==============  =============
+Dose.FC.CTG  Dose.FC.LYZ.NS  Dose.FC.LYZ.S
+===========  ==============  =============
+       0.53           0.509          0.526
+===========  ==============  =============
+
+Spearman Correlation per plate:
+=====  ===========  ==============  =============
+Plate  Dose.FC.CTG  Dose.FC.LYZ.NS  Dose.FC.LYZ.S
+=====  ===========  ==============  =============
+P1           0.626           0.579          0.610
+P2           0.668           0.595          0.617
+P3           0.603           0.676          0.649
+P4           0.283           0.248          0.286
+P5           0.427           0.423          0.446
+=====  ===========  ==============  =============
+
+Saved S.Corr as TSI_m29_m31_Spearman.Corr.plate.csv with columns:
+ Plate Dose.FC.CTG Dose.FC.LYZ.NS Dose.FC.LYZ.S
+Saved S.Corr.all as TSI_m29_m31_Spearman.Corr.all.csv with columns:
+ Dose.FC.CTG Dose.FC.LYZ.NS Dose.FC.LYZ.S
+Saved Corr as TSI_m29_m31_Pearson.Corr.plate.csv with columns:
+ Plate Dose.FC.CTG Dose.FC.LYZ.NS Dose.FC.LYZ.S
+Saved Corr.all as TSI_m29_m31_Pearson.Corr.all.csv with columns:
+ Dose.FC.CTG Dose.FC.LYZ.NS Dose.FC.LYZ.S
+
+Plotted Correlation Plots for:	 Treatment between mice m30 m31
+Pearson Correlation between mice:	
+===========  ==============  =============
+Dose.FC.CTG  Dose.FC.LYZ.NS  Dose.FC.LYZ.S
+===========  ==============  =============
+      0.513           0.434          0.481
+===========  ==============  =============
+
+Pearson Correlation per plate:
+=====  ===========  ==============  =============
+Plate  Dose.FC.CTG  Dose.FC.LYZ.NS  Dose.FC.LYZ.S
+=====  ===========  ==============  =============
+P1           0.539           0.559          0.565
+P2           0.561           0.395          0.459
+P3           0.669           0.558          0.577
+P4           0.381           0.398          0.440
+P5           0.512           0.292          0.375
+=====  ===========  ==============  =============
+
+Spearman Correlation between mice:	
+===========  ==============  =============
+Dose.FC.CTG  Dose.FC.LYZ.NS  Dose.FC.LYZ.S
+===========  ==============  =============
+      0.411           0.446          0.463
+===========  ==============  =============
+
+Spearman Correlation per plate:
+=====  ===========  ==============  =============
+Plate  Dose.FC.CTG  Dose.FC.LYZ.NS  Dose.FC.LYZ.S
+=====  ===========  ==============  =============
+P1           0.528           0.579          0.579
+P2           0.501           0.422          0.471
+P3           0.507           0.537          0.522
+P4           0.131           0.409          0.397
+P5           0.378           0.276          0.354
+=====  ===========  ==============  =============
+
+Saved S.Corr as TSI_m30_m31_Spearman.Corr.plate.csv with columns:
+ Plate Dose.FC.CTG Dose.FC.LYZ.NS Dose.FC.LYZ.S
+Saved S.Corr.all as TSI_m30_m31_Spearman.Corr.all.csv with columns:
+ Dose.FC.CTG Dose.FC.LYZ.NS Dose.FC.LYZ.S
+Saved Corr as TSI_m30_m31_Pearson.Corr.plate.csv with columns:
+ Plate Dose.FC.CTG Dose.FC.LYZ.NS Dose.FC.LYZ.S
+Saved Corr.all as TSI_m30_m31_Pearson.Corr.all.csv with columns:
+ Dose.FC.CTG Dose.FC.LYZ.NS Dose.FC.LYZ.S
+Saved Dose.tbl as TSI_CTG_Dose_Data.csv with columns:
+ Treatment Rep D0.08 D0.4 D02 D10
+Saved Dose.tbl as TSI_LYZ.NS_Dose_Data.csv with columns:
+ Treatment Rep D0.08 D0.4 D02 D10
+Saved Dose.tbl as TSI_LYZ.S_Dose_Data.csv with columns:
+ Treatment Rep D0.08 D0.4 D02 D10
