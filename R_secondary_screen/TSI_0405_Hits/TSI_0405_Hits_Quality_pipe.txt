@@ -1,0 +1,38 @@
+TSI_0405_Hits pipeline
+Times pipeline was run:
+1
+Assays performed:  CTG LYZ.NS LYZ.S
+Controls used:  POS
+Dates of Experiments:  405
+
+Pipeline run: 1 	on: 2018-04-10 10:17:29
+Imported Target list
+	 TSI_0405_compiled.xlsx
+Saved RAW.Full.tbl as Raw_data.csv
+	 RAW.Full.tbl
+Transformed raw data to Log10 space
+Saved Log.Raw.tbl as Log_Norm_data.csv
+Found fold change of log values relative to median of POS
+Saved FC.Full.tbl as Plate_Norm_data.csv
+
+Performing Data Analysis for: FC.Full.tbl
+Summarized FC.Full.tbl grouped by Time Treatment Dose
+Found Z scores for DoseFC
+Found Replicate UMVUE SSMD scores with POS as control
+Saved Analyzed.FC.tbl as TSI_0405_Hits_Analyzed.FC.tbl.csv
+Saved Doses.val as TSI_0405_Hits_Treatment.Doses.csv
+Saved Dose.tbl as TSI_0405_Hits_CTG_Dose_Data.csv
+Saved Dose.tbl as TSI_0405_Hits_LYZ.NS_Dose_Data.csv
+Saved Dose.tbl as TSI_0405_Hits_LYZ.S_Dose_Data.csv
+
+Performing Replicate Hit Analysis for: FC.Full.tbl
+Critical Values for Replicate screen ( Rep.n ):
+=====  =========  =====
+count   SSMDcrit  alpha
+=====  =========  =====
+    8  0.8895184   0.05
+=====  =========  =====
+
+Saved Filt.tbl as TSI_0405_Hits_Rep_hits.csv
+Critical Values for Z scored FC (10%): 1.281552
+Saved Filt.tbl as TSI_0405_Hits_Z_Rep_hits.csv
