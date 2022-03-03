@@ -1,5 +1,5 @@
 # Mead_et_al_NatBME_2021
-Code and analyses for Mead et al Nature BME 2021
+Code and analyses for Mead et al Nature BME 2022
 
 Includes analysis pipeline for Primary and Secondary screening, and single-cell RNA-seq analysis scripts for processed DGEs (data available at Broad Institute single cell portal)
 
